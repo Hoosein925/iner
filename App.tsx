@@ -390,45 +390,36 @@ const App: React.FC = () => {
   
     const handleAddTrainingMaterial = async (month: string, fileData: FileUploadData) => {
         if (!selectedHospitalId) return;
-        const hospital = findHospital(selectedHospitalId);
-        if (!hospital) return;
-
         const { path, error: uploadError } = await db.uploadFileFromDataUrl(fileData.dataUrl, fileData.name);
         if (uploadError) {
             alert(`خطا در آپلود فایل: ${uploadError.message}`);
             return;
         }
-
-        if (!hospital.trainingMaterials) hospital.trainingMaterials = [];
-        let monthlyTraining = hospital.trainingMaterials.find(t => t.month === month);
-        if (!monthlyTraining) {
-            monthlyTraining = { month, materials: [] };
-            hospital.trainingMaterials.push(monthlyTraining);
-        }
         
         const newMaterial: TrainingMaterial = {
-            id: Date.now().toString(),
-            name: fileData.name,
-            type: fileData.type,
-            storagePath: path,
-            description: fileData.description
+            id: Date.now().toString(), name: fileData.name, type: fileData.type,
+            storagePath: path, description: fileData.description
         };
 
-        monthlyTraining.materials.push(newMaterial);
-        const { error: saveError } = await db.upsertHospital(hospital);
-        if (saveError) alert(`Error: ${saveError.message}`); else refreshData();
+        const { error: saveError } = await db.addTrainingMaterial(selectedHospitalId, month, newMaterial);
+        if (saveError) {
+            await db.deleteFile(path); // Cleanup on error
+            alert(`خطا در ذخیره اطلاعات فایل: ${saveError.message}`);
+        } else {
+            refreshData();
+        }
     };
 
     const handleDeleteTrainingMaterial = async (month: string, materialId: string) => {
         if (!selectedHospitalId) return;
+        // This is a complex operation that needs to be atomic. We will create a dedicated function in db.ts
+        // For now, let's assume a simpler model. The db function should handle atomicity.
         const hospital = findHospital(selectedHospitalId);
         if (hospital?.trainingMaterials) {
             const monthlyTraining = hospital.trainingMaterials.find(t => t.month === month);
             if (monthlyTraining) {
                 const materialToDelete = monthlyTraining.materials.find(m => m.id === materialId);
-                if (materialToDelete) {
-                    await db.deleteFile(materialToDelete.storagePath);
-                }
+                if (materialToDelete) await db.deleteFile(materialToDelete.storagePath);
                 monthlyTraining.materials = monthlyTraining.materials.filter(m => m.id !== materialId);
             }
             const { error } = await db.upsertHospital(hospital);
@@ -449,16 +440,19 @@ const App: React.FC = () => {
 
     const handleAddAccreditationMaterial = async (fileData: FileUploadData) => {
         if (!selectedHospitalId) return;
-        const hospital = findHospital(selectedHospitalId);
-        if (hospital) {
-            const { path, error: uploadError } = await db.uploadFileFromDataUrl(fileData.dataUrl, fileData.name);
-            if (uploadError) { alert(`خطا در آپلود فایل: ${uploadError.message}`); return; }
-
-            if (!hospital.accreditationMaterials) hospital.accreditationMaterials = [];
-            const newMaterial: TrainingMaterial = { id: Date.now().toString(), name: fileData.name, type: fileData.type, storagePath: path, description: fileData.description };
-            hospital.accreditationMaterials.push(newMaterial);
-            const { error } = await db.upsertHospital(hospital);
-            if (error) alert(`Error: ${error.message}`); else refreshData();
+        const { path, error: uploadError } = await db.uploadFileFromDataUrl(fileData.dataUrl, fileData.name);
+        if (uploadError) {
+            alert(`خطا در آپلود فایل: ${uploadError.message}`);
+            return;
+        }
+        const newMaterial: TrainingMaterial = { id: Date.now().toString(), name: fileData.name, type: fileData.type, storagePath: path, description: fileData.description };
+        
+        const { error: saveError } = await db.addAccreditationMaterial(selectedHospitalId, newMaterial);
+        if (saveError) {
+            await db.deleteFile(path);
+            alert(`خطا در ذخیره اطلاعات: ${saveError.message}`);
+        } else {
+            refreshData();
         }
     };
   
@@ -487,16 +481,18 @@ const App: React.FC = () => {
 
     const handleAddNewsBanner = async (banner: Omit<NewsBanner, 'id' | 'imageStoragePath'>, fileData: FileUploadData) => {
         if (!selectedHospitalId) return;
-        const hospital = findHospital(selectedHospitalId);
-        if (hospital) {
-            const { path, error: uploadError } = await db.uploadFileFromDataUrl(fileData.dataUrl, fileData.name);
-            if (uploadError) { alert(`خطا در آپلود فایل: ${uploadError.message}`); return; }
-            
-            if (!hospital.newsBanners) hospital.newsBanners = [];
-            const newBanner: NewsBanner = { ...banner, id: Date.now().toString(), imageStoragePath: path };
-            hospital.newsBanners.push(newBanner);
-            const { error } = await db.upsertHospital(hospital);
-            if (error) alert(`Error: ${error.message}`); else refreshData();
+        const { path, error: uploadError } = await db.uploadFileFromDataUrl(fileData.dataUrl, fileData.name);
+        if (uploadError) {
+            alert(`خطا در آپلود فایل: ${uploadError.message}`);
+            return;
+        }
+        const newBanner: NewsBanner = { ...banner, id: Date.now().toString(), imageStoragePath: path };
+        const { error: saveError } = await db.addNewsBanner(selectedHospitalId, newBanner);
+        if (saveError) {
+            await db.deleteFile(path);
+            alert(`خطا در ذخیره بنر: ${saveError.message}`);
+        } else {
+            refreshData();
         }
     };
 
@@ -524,18 +520,19 @@ const App: React.FC = () => {
     };
   
     const handleAddPatientEducationMaterial = async (fileData: FileUploadData) => {
-        if (!selectedDepartmentId) return;
-        const hospital = findHospital(selectedHospitalId);
-        const department = findDepartment(hospital, selectedDepartmentId);
-        if (department) {
-            const { path, error: uploadError } = await db.uploadFileFromDataUrl(fileData.dataUrl, fileData.name);
-            if (uploadError) { alert(`خطا در آپلود فایل: ${uploadError.message}`); return; }
-
-            if (!department.patientEducationMaterials) department.patientEducationMaterials = [];
-            const newMaterial: TrainingMaterial = { id: Date.now().toString(), name: fileData.name, type: fileData.type, storagePath: path, description: fileData.description };
-            department.patientEducationMaterials.push(newMaterial);
-            const { error } = await db.upsertDepartment(department, selectedHospitalId!);
-            if (error) alert(`Error: ${error.message}`); else refreshData();
+        if (!selectedHospitalId || !selectedDepartmentId) return;
+        const { path, error: uploadError } = await db.uploadFileFromDataUrl(fileData.dataUrl, fileData.name);
+        if (uploadError) {
+            alert(`خطا در آپلود فایل: ${uploadError.message}`);
+            return;
+        }
+        const newMaterial: TrainingMaterial = { id: Date.now().toString(), name: fileData.name, type: fileData.type, storagePath: path, description: fileData.description };
+        const { error: saveError } = await db.addPatientEducationMaterial(selectedHospitalId, selectedDepartmentId, newMaterial);
+        if (saveError) {
+            await db.deleteFile(path);
+            alert(`خطا در ذخیره فایل: ${saveError.message}`);
+        } else {
+            refreshData();
         }
     };
 
@@ -565,121 +562,83 @@ const App: React.FC = () => {
     };
 
   const handleAddPatient = async (name: string, nationalId: string, password?: string) => {
-    if (!selectedDepartmentId) return;
-    const hospital = findHospital(selectedHospitalId);
-    const department = findDepartment(hospital, selectedDepartmentId);
-    if (department) {
-        if (!department.patients) department.patients = [];
-        const newPatient: Patient = { id: Date.now().toString(), name, nationalId, password, chatHistory: [] };
-        department.patients.push(newPatient);
-        const { error } = await db.upsertDepartment(department, selectedHospitalId!);
-        if (error) alert(`Error: ${error.message}`); else refreshData();
-    }
+    if (!selectedHospitalId || !selectedDepartmentId) return;
+    const newPatient: Patient = { id: Date.now().toString(), name, nationalId, password, chatHistory: [] };
+    const { error } = await db.addPatient(selectedHospitalId, selectedDepartmentId, newPatient);
+    if (error) alert(`Error: ${error.message}`); else refreshData();
   };
 
   const handleDeletePatient = async (patientId: string) => {
-    if (!selectedDepartmentId) return;
-    const hospital = findHospital(selectedHospitalId);
-    const department = findDepartment(hospital, selectedDepartmentId);
-    if (department?.patients) {
-        department.patients = department.patients.filter(p => p.id !== patientId);
-        const { error } = await db.upsertDepartment(department, selectedHospitalId!);
-        if (error) alert(`Error: ${error.message}`); else refreshData();
-    }
+    if (!selectedHospitalId || !selectedDepartmentId) return;
+    const { error } = await db.deletePatient(selectedHospitalId, selectedDepartmentId, patientId);
+    if (error) alert(`Error: ${error.message}`); else refreshData();
   };
 
   const handleChatMessageSend = async (hospitalId: string, departmentId: string, patientId: string, sender: 'patient' | 'manager', content: { text?: string; fileData?: FileUploadData }) => {
-      const hospital = findHospital(hospitalId);
-      const department = findDepartment(hospital, departmentId);
-      const patient = department?.patients?.find(p => p.id === patientId);
-      if (!patient) return;
-
       let fileInfo: ChatMessage['file'] | undefined;
+      let uploadPath: string | null = null;
       if (content.fileData) {
           const { path, error } = await db.uploadFileFromDataUrl(content.fileData.dataUrl, content.fileData.name);
           if (error) { alert(`خطا در آپلود فایل: ${error.message}`); return; }
+          uploadPath = path;
           fileInfo = { id: `file-${Date.now()}`, name: content.fileData.name, type: content.fileData.type, storagePath: path };
       }
 
-      if (!patient.chatHistory) patient.chatHistory = [];
       const newMessage: ChatMessage = { id: Date.now().toString(), sender, timestamp: new Date().toISOString(), text: content.text, file: fileInfo };
-      patient.chatHistory.push(newMessage);
-
-      const { error } = await db.upsertDepartment(department!, hospitalId);
-      if (error) alert(`خطا در ارسال پیام: ${error.message}`); else refreshData();
+      
+      const { error } = await db.sendChatMessage(hospitalId, departmentId, patientId, newMessage);
+      if (error) {
+          if (uploadPath) await db.deleteFile(uploadPath); // Cleanup on error
+          alert(`خطا در ارسال پیام: ${error.message}`);
+      } else {
+          refreshData();
+      }
   };
 
   const handleAdminOrHospitalMessageSend = async (hospitalId: string, sender: 'hospital' | 'admin', content: { text?: string; fileData?: FileUploadData }) => {
-      const hospital = findHospital(hospitalId);
-      if (!hospital) return;
-
       let fileInfo: AdminMessage['file'] | undefined;
+      let uploadPath: string | null = null;
       if (content.fileData) {
           const { path, error } = await db.uploadFileFromDataUrl(content.fileData.dataUrl, content.fileData.name);
           if (error) { alert(`خطا در آپلود فایل: ${error.message}`); return; }
+          uploadPath = path;
           fileInfo = { id: `file-${Date.now()}`, name: content.fileData.name, type: content.fileData.type, storagePath: path };
       }
 
-      if (!hospital.adminMessages) hospital.adminMessages = [];
       const newMessage: AdminMessage = { id: Date.now().toString(), sender, timestamp: new Date().toISOString(), text: content.text, file: fileInfo };
-      hospital.adminMessages.push(newMessage);
-      const { error } = await db.upsertHospital(hospital);
-      if (error) alert(`Error: ${error.message}`); else refreshData();
+      
+      const { error } = await db.sendAdminMessage(hospitalId, newMessage);
+      if (error) {
+          if (uploadPath) await db.deleteFile(uploadPath);
+          alert(`Error: ${error.message}`);
+      } else {
+          refreshData();
+      }
   };
 
   const handleUpdateNeedsAssessmentTopics = async (month: string, topics: NeedsAssessmentTopic[]) => {
     if (!selectedHospitalId) return;
-    const hospital = findHospital(selectedHospitalId);
-    if (hospital) {
-        if (!hospital.needsAssessments) hospital.needsAssessments = [];
-        let needsAssessment = hospital.needsAssessments.find(na => na.month === month && na.year === activeYear);
-        if (needsAssessment) {
-            needsAssessment.topics = topics;
-        } else {
-            const newNA: MonthlyNeedsAssessment = { month, year: activeYear, topics };
-            hospital.needsAssessments.push(newNA);
-        }
-        const { error } = await db.upsertHospital(hospital);
-        if (error) alert(`Error: ${error.message}`); else refreshData();
-    }
+    const { error } = await db.updateNeedsAssessmentTopics(selectedHospitalId, month, activeYear, topics);
+    if (error) alert(`Error: ${error.message}`); else refreshData();
   };
 
   const handleReplaceHospitalData = async (hospitalData: Hospital) => {
-    const allHospitals = [...hospitals];
-    const hospitalIndex = allHospitals.findIndex(h => h.id === hospitalData.id);
-    if (hospitalIndex === -1) {
-        alert('بیمارستان مورد نظر در پایگاه داده یافت نشد.');
-        return;
-    }
-    allHospitals[hospitalIndex] = hospitalData;
-    const { error } = await db.saveAllHospitals(allHospitals);
+    const { error } = await db.upsertHospital(hospitalData);
     if (error) {
         alert(`خطا در ذخیره اطلاعات بیمارستان: ${error.message}`);
     } else {
         alert('اطلاعات بیمارستان با موفقیت بارگذاری شد.');
-        setHospitals(allHospitals);
+        refreshData();
     }
   };
 
   const handleReplaceDepartmentData = async (hospitalId: string, departmentData: Department) => {
-      const allHospitals = [...hospitals];
-      const hospital = allHospitals.find(h => h.id === hospitalId);
-      if (!hospital) {
-          alert('بیمارستان مورد نظر یافت نشد.');
-          return;
-      }
-      const departmentIndex = hospital.departments.findIndex(d => d.id === departmentData.id);
-      if (departmentIndex === -1) {
-          alert('بخش مورد نظر در این بیمارستان یافت نشد.');
-          return;
-      }
-      hospital.departments[departmentIndex] = departmentData;
-      const { error } = await db.saveAllHospitals(allHospitals);
+      const { error } = await db.upsertDepartment(departmentData, hospitalId);
       if (error) {
           alert(`خطا در ذخیره اطلاعات بخش: ${error.message}`);
       } else {
           alert('اطلاعات بخش با موفقیت بارگذاری شد.');
-          setHospitals(allHospitals);
+          refreshData();
       }
   };
 
@@ -803,7 +762,7 @@ const App: React.FC = () => {
         link.click();
       } 
       // Supervisor/Admin on Department List screen -> Backup of the selected hospital
-      else if (currentView === View.DepartmentList) {
+      else if (currentView === View.DepartmentList && (loggedInUser?.role === UserRole.Admin || loggedInUser?.role === UserRole.Supervisor)) {
         const hospital = findHospital(selectedHospitalId);
         if (!hospital) return;
         const dataToSave = { type: 'hospital_backup', hospitalId: hospital.id, data: hospital };
@@ -865,20 +824,12 @@ const App: React.FC = () => {
       reader.readAsText(file);
   };
 
-  const renderContent = () => {
-    if (isLoading && appScreen === AppScreen.Welcome) {
-        return <div className="h-screen w-screen flex items-center justify-center bg-slate-100 dark:bg-slate-900"><div className="text-center"><p className="text-xl font-semibold text-slate-700 dark:text-slate-300">در حال بارگذاری و همگام‌سازی اطلاعات...</p></div></div>;
-    }
-
+  const renderMainContent = () => {
     const renderUnauthorized = () => {
         handleLogout();
-        return <WelcomeScreen onEnter={() => setIsLoginModalOpen(true)} />;
+        return null; // The logic will redirect to welcome screen
     };
 
-    if (appScreen === AppScreen.Welcome) {
-      return <WelcomeScreen onEnter={() => setIsLoginModalOpen(true)} />;
-    }
-    
     if (!loggedInUser) return renderUnauthorized();
 
     if (appScreen === AppScreen.HospitalList) {
@@ -990,9 +941,25 @@ const App: React.FC = () => {
     ((loggedInUser.role === UserRole.Admin || loggedInUser.role === UserRole.Supervisor || loggedInUser.role === UserRole.Manager) && currentView === View.DepartmentView)
   );
 
+  if (isLoading && appScreen === AppScreen.Welcome) {
+    return <div className="h-screen w-screen flex items-center justify-center bg-slate-100 dark:bg-slate-900"><div className="text-center"><p className="text-xl font-semibold text-slate-700 dark:text-slate-300">در حال بارگذاری و همگام‌سازی اطلاعات...</p></div></div>;
+  }
+  
+  if (appScreen === AppScreen.Welcome) {
+      return (
+          <>
+            <Suspense fallback={<LoadingSpinner />}>
+              <WelcomeScreen onEnter={() => setIsLoginModalOpen(true)} />
+            </Suspense>
+            <AboutModal isOpen={isAboutModalOpen} onClose={() => setIsAboutModalOpen(false)} />
+            <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} onLogin={handleLogin} loginError={loginError} />
+          </>
+      );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300 flex flex-col">
-        {appScreen !== AppScreen.Welcome && loggedInUser?.role !== UserRole.Patient && (
+        {loggedInUser?.role !== UserRole.Patient && (
             <header className="sticky top-0 z-40 bg-gradient-to-r from-purple-600 to-indigo-700 shadow-lg text-white">
                 <div className="container mx-auto px-4 sm:px-6 lg:px-8 h-16 flex justify-between items-center">
                     <div className="flex items-center gap-4">
@@ -1037,12 +1004,15 @@ const App: React.FC = () => {
                 </div>
             </header>
         )}
-        <main className={`container mx-auto flex-grow ${appScreen !== AppScreen.Welcome ? 'py-8' : ''}`}>
+        {/* FIX: The conditional class was redundant. Due to the check for AppScreen.Welcome earlier in the component, this part of the code is only reachable when it's not the welcome screen, so 'py-8' can be applied directly. */}
+        {/* FIX: Removed redundant conditional check for `appScreen`. The `py-8` class is always applied on this code path. */}
+        <main className="container mx-auto flex-grow py-8">
           <Suspense fallback={<LoadingSpinner />}>
-            {renderContent()}
+            {renderMainContent()}
           </Suspense>
         </main>
-        {appScreen !== AppScreen.Welcome && <Footer />}
+        {/* FIX: This conditional render was redundant. The Footer should always be shown if not on the Welcome screen, which is guaranteed by the early return for AppScreen.Welcome. */}
+        <Footer />
         <AboutModal isOpen={isAboutModalOpen} onClose={() => setIsAboutModalOpen(false)} />
         <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} onLogin={handleLogin} loginError={loginError} />
     </div>
