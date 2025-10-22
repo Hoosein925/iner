@@ -1,7 +1,4 @@
 
-
-
-
 export interface SkillItem {
   description: string;
   score: number;
@@ -109,6 +106,7 @@ export interface ChatMessage {
     id: string;
     name: string;
     type: string;
+    storagePath: string;
   }
 }
 
@@ -137,7 +135,7 @@ export interface TrainingMaterial {
   id: string;
   name: string;
   type: string; // Mime type
-  data?: string; // Base64 encoded data URL
+  storagePath: string; 
   description?: string;
 }
 
@@ -150,7 +148,7 @@ export interface NewsBanner {
     id: string;
     title: string;
     description: string;
-    imageId: string; // a reference to the image data stored in IndexedDB
+    imageStoragePath: string;
 }
 
 export interface AdminMessage {
@@ -162,6 +160,7 @@ export interface AdminMessage {
     id: string;
     name: string;
     type: string;
+    storagePath: string;
   }
 }
 

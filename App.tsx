@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, Suspense, useRef } from 'react';
 import { Department, StaffMember, View, SkillCategory, Assessment, Hospital, AppScreen, NamedChecklistTemplate, ExamTemplate, ExamSubmission, LoggedInUser, UserRole, TrainingMaterial, MonthlyTraining, NewsBanner, MonthlyWorkLog, Patient, ChatMessage, AdminMessage, NeedsAssessmentTopic, MonthlyNeedsAssessment } from './types';
 import LoadingSpinner from './components/LoadingSpinner';
 import AboutModal from './components/AboutModal';
@@ -10,6 +9,7 @@ import { InfoIcon } from './components/icons/InfoIcon';
 import { LogoutIcon } from './components/icons/LogoutIcon';
 import { BackIcon } from './components/icons/BackIcon';
 import * as db from './services/db';
+import Footer from './components/Footer';
 
 const WelcomeScreen = React.lazy(() => import('./components/WelcomeScreen'));
 const HospitalList = React.lazy(() => import('./components/HospitalList'));
@@ -27,6 +27,13 @@ const AdminCommunicationView = React.lazy(() => import('./components/AdminCommun
 const HospitalCommunicationView = React.lazy(() => import('./components/HospitalCommunicationView'));
 const NeedsAssessmentManager = React.lazy(() => import('./components/NeedsAssessmentManager'));
 
+// Type for file data passed from components to App
+interface FileUploadData {
+    name: string;
+    type: string;
+    dataUrl: string;
+    description?: string;
+}
 
 const getCurrentJalaliYear = () => {
     try {
@@ -35,6 +42,24 @@ const getCurrentJalaliYear = () => {
         return new Date().getFullYear() - 621;
     }
 };
+
+const ACTIVE_YEAR_KEY = 'app_active_year';
+
+const getInitialActiveYear = (): number => {
+    try {
+        const storedYear = localStorage.getItem(ACTIVE_YEAR_KEY);
+        if (storedYear) {
+            const year = parseInt(storedYear, 10);
+            if (!isNaN(year)) {
+                return year;
+            }
+        }
+    } catch (e) {
+        console.error("Could not read active year from localStorage", e);
+    }
+    return getCurrentJalaliYear();
+};
+
 
 const App: React.FC = () => {
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
@@ -48,8 +73,17 @@ const App: React.FC = () => {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loggedInUser, setLoggedInUser] = useState<LoggedInUser | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
-  const [activeYear, setActiveYear] = useState<number>(getCurrentJalaliYear());
+  const [activeYear, setActiveYear] = useState<number>(getInitialActiveYear());
+
+  useEffect(() => {
+    try {
+        localStorage.setItem(ACTIVE_YEAR_KEY, String(activeYear));
+    } catch (e) {
+        console.error("Could not save active year to localStorage", e);
+    }
+  }, [activeYear]);
 
   const refreshData = useCallback(async () => {
       console.log("Refreshing data...");
@@ -231,39 +265,33 @@ const App: React.FC = () => {
       }
   };
 
-  const handleResetHospital = (supervisorNationalId: string, supervisorPassword: string): boolean => {
-      const hospital = findHospital(selectedHospitalId);
-      if (hospital && hospital.supervisorNationalId === supervisorNationalId && hospital.supervisorPassword === supervisorPassword) {
-          if (window.confirm(`آیا مطمئن هستید که می‌خواهید تمام بخش‌های بیمارستان "${hospital.name}" را حذف کنید؟ این عمل غیرقابل بازگشت است.`)) {
-              hospital.departments.forEach(async (dep) => {
-                  const { error } = await db.deleteDepartment(dep.id);
-                  if (error) alert(`خطا در حذف بخش ${dep.name}: ${error.message}`);
-              });
-              refreshData();
-              return true;
-          }
-      }
-      return false;
-  };
-  
-  const handleArchiveYear = async (yearToArchive: number) => {
-      const hospitalsCopy = JSON.parse(JSON.stringify(hospitals)) as Hospital[];
-      hospitalsCopy.forEach(h => {
-          h.departments.forEach(d => {
-              d.staff.forEach(s => {
-                  s.assessments = s.assessments.filter(a => a.year !== yearToArchive);
-                  if(s.workLogs) s.workLogs = s.workLogs.filter(wl => wl.year !== yearToArchive);
-              });
-          });
-          if(h.needsAssessments) h.needsAssessments = h.needsAssessments.filter(na => na.year !== yearToArchive);
-      });
+    const handleResetHospital = async (supervisorNationalId: string): Promise<boolean> => {
+        const hospital = findHospital(selectedHospitalId);
+        if (!hospital) return false;
 
-      const { error } = await db.saveAllHospitals(hospitalsCopy);
-      if (error) alert(`Error during archive: ${error.message}`);
-      else {
-          setActiveYear(yearToArchive + 1);
-          refreshData();
-      }
+        const isAdmin = loggedInUser?.role === UserRole.Admin;
+        const adminId = '5850008985';
+
+        const isSupervisorMatch = hospital.supervisorNationalId === supervisorNationalId;
+        const isAdminOverride = isAdmin && supervisorNationalId === adminId;
+        
+        if (isSupervisorMatch || isAdminOverride) {
+            setIsLoading(true);
+            const { error } = await db.resetHospitalDepartments(selectedHospitalId!);
+            if (error) {
+                alert(`خطا در ریست کردن بیمارستان: ${error.message}`);
+                setIsLoading(false);
+                return false;
+            }
+            await refreshData();
+            return true;
+        }
+        
+        return false;
+    };
+  
+  const handleArchiveYear = (yearToArchive: number) => {
+    setActiveYear(yearToArchive + 1);
   };
 
   const handleUpdateAssessmentMessages = async (departmentId: string, staffId: string, month: string, year: number, messages: { supervisorMessage: string; managerMessage: string; }) => {
@@ -310,20 +338,6 @@ const App: React.FC = () => {
       const { error } = await db.upsertHospital(hospital);
       if (error) alert(`خطا در ثبت نظرسنجی: ${error.message}`);
       else refreshData();
-  };
-
-  const handlePatientSendMessage = async (patientId: string, content: { text?: string; file?: { id: string; name: string; type: string; } }) => {
-      const hospital = findHospital(loggedInUser?.hospitalId!);
-      const department = findDepartment(hospital, loggedInUser?.departmentId!);
-      const patient = department?.patients?.find(p => p.id === patientId);
-      if (patient) {
-          if (!patient.chatHistory) patient.chatHistory = [];
-          const newMessage: ChatMessage = { id: Date.now().toString(), sender: 'patient', timestamp: new Date().toISOString(), ...content };
-          patient.chatHistory.push(newMessage);
-          const { error } = await db.upsertDepartment(department!, hospital!.id);
-          if (error) alert(`خطا در ارسال پیام: ${error.message}`);
-          else refreshData();
-      }
   };
 
   const handleAddOrUpdateChecklistTemplate = async (template: NamedChecklistTemplate) => {
@@ -373,160 +387,182 @@ const App: React.FC = () => {
       if (error) alert(`Error: ${error.message}`); else refreshData();
     }
   };
+  
+    const handleAddTrainingMaterial = async (month: string, fileData: FileUploadData) => {
+        if (!selectedHospitalId) return;
+        const hospital = findHospital(selectedHospitalId);
+        if (!hospital) return;
 
-  const handleAddTrainingMaterial = async (month: string, material: TrainingMaterial) => {
-    if (!selectedHospitalId) return;
-    const hospital = findHospital(selectedHospitalId);
-    if (!hospital) return;
-    if (!hospital.trainingMaterials) hospital.trainingMaterials = [];
-
-    let monthlyTraining = hospital.trainingMaterials.find(t => t.month === month);
-    if (!monthlyTraining) {
-        monthlyTraining = { month, materials: [] };
-        hospital.trainingMaterials.push(monthlyTraining);
-    }
-    await db.addMaterial({ id: material.id, data: material.data! });
-    monthlyTraining.materials.push({ ...material, data: undefined });
-    const { error } = await db.upsertHospital(hospital);
-    if (error) alert(`Error: ${error.message}`); else refreshData();
-  };
-
-  const handleDeleteTrainingMaterial = async (month: string, materialId: string) => {
-    if (!selectedHospitalId) return;
-    const hospital = findHospital(selectedHospitalId);
-    if (hospital?.trainingMaterials) {
-        const monthlyTraining = hospital.trainingMaterials.find(t => t.month === month);
-        if (monthlyTraining) {
-            monthlyTraining.materials = monthlyTraining.materials.filter(m => m.id !== materialId);
-            await db.deleteMaterial(materialId);
+        const { path, error: uploadError } = await db.uploadFileFromDataUrl(fileData.dataUrl, fileData.name);
+        if (uploadError) {
+            alert(`خطا در آپلود فایل: ${uploadError.message}`);
+            return;
         }
-        const { error } = await db.upsertHospital(hospital);
-        if (error) alert(`Error: ${error.message}`); else refreshData();
-    }
-  };
-  
-  const handleUpdateTrainingMaterialDescription = async (month: string, materialId: string, description: string) => {
-    if (!selectedHospitalId) return;
-    const hospital = findHospital(selectedHospitalId);
-    if (hospital?.trainingMaterials) {
-        const monthlyTraining = hospital.trainingMaterials.find(t => t.month === month);
-        const material = monthlyTraining?.materials.find(m => m.id === materialId);
-        if (material) material.description = description;
-        const { error } = await db.upsertHospital(hospital);
-        if (error) alert(`Error: ${error.message}`); else refreshData();
-    }
-  };
 
-  const handleAddAccreditationMaterial = async (material: TrainingMaterial) => {
-    if (!selectedHospitalId) return;
-    const hospital = findHospital(selectedHospitalId);
-    if (hospital) {
-        if (!hospital.accreditationMaterials) hospital.accreditationMaterials = [];
-        await db.addMaterial({ id: material.id, data: material.data! });
-        hospital.accreditationMaterials.push({ ...material, data: undefined });
-        const { error } = await db.upsertHospital(hospital);
-        if (error) alert(`Error: ${error.message}`); else refreshData();
-    }
-  };
-  
-  const handleDeleteAccreditationMaterial = async (materialId: string) => {
-    if (!selectedHospitalId) return;
-    const hospital = findHospital(selectedHospitalId);
-    if (hospital?.accreditationMaterials) {
-        hospital.accreditationMaterials = hospital.accreditationMaterials.filter(m => m.id !== materialId);
-        await db.deleteMaterial(materialId);
-        const { error } = await db.upsertHospital(hospital);
-        if (error) alert(`Error: ${error.message}`); else refreshData();
-    }
-  };
-  
-  const handleUpdateAccreditationMaterialDescription = async (materialId: string, description: string) => {
-    if (!selectedHospitalId) return;
-    const hospital = findHospital(selectedHospitalId);
-    if (hospital?.accreditationMaterials) {
-        const material = hospital.accreditationMaterials.find(m => m.id === materialId);
-        if (material) material.description = description;
-        const { error } = await db.upsertHospital(hospital);
-        if (error) alert(`Error: ${error.message}`); else refreshData();
-    }
-  };
-
-  const handleAddNewsBanner = async (banner: Omit<NewsBanner, 'id' | 'imageId'>, file: File, imageData: string) => {
-    if (!selectedHospitalId) return;
-    const hospital = findHospital(selectedHospitalId);
-    if (hospital) {
-        if (!hospital.newsBanners) hospital.newsBanners = [];
-        const imageId = `banner-img-${Date.now()}`;
-        await db.addMaterial({ id: imageId, data: imageData });
-        const newBanner: NewsBanner = { ...banner, id: Date.now().toString(), imageId };
-        hospital.newsBanners.push(newBanner);
-        const { error } = await db.upsertHospital(hospital);
-        if (error) alert(`Error: ${error.message}`); else refreshData();
-    }
-  };
-
-  const handleDeleteNewsBanner = async (bannerId: string) => {
-    if (!selectedHospitalId) return;
-    const hospital = findHospital(selectedHospitalId);
-    if (hospital?.newsBanners) {
-        const banner = hospital.newsBanners.find(b => b.id === bannerId);
-        if (banner) await db.deleteMaterial(banner.imageId);
-        hospital.newsBanners = hospital.newsBanners.filter(b => b.id !== bannerId);
-        const { error } = await db.upsertHospital(hospital);
-        if (error) alert(`Error: ${error.message}`); else refreshData();
-    }
-  };
-
-  const handleUpdateNewsBanner = async (bannerId: string, title: string, description: string) => {
-    if (!selectedHospitalId) return;
-    const hospital = findHospital(selectedHospitalId);
-    if (hospital?.newsBanners) {
-        const banner = hospital.newsBanners.find(b => b.id === bannerId);
-        if (banner) {
-            banner.title = title;
-            banner.description = description;
+        if (!hospital.trainingMaterials) hospital.trainingMaterials = [];
+        let monthlyTraining = hospital.trainingMaterials.find(t => t.month === month);
+        if (!monthlyTraining) {
+            monthlyTraining = { month, materials: [] };
+            hospital.trainingMaterials.push(monthlyTraining);
         }
-        const { error } = await db.upsertHospital(hospital);
-        if (error) alert(`Error: ${error.message}`); else refreshData();
-    }
-  };
-  
-  const handleAddPatientEducationMaterial = async (material: TrainingMaterial) => {
-    if (!selectedDepartmentId) return;
-    const hospital = findHospital(selectedHospitalId);
-    const department = findDepartment(hospital, selectedDepartmentId);
-    if (department) {
-        if (!department.patientEducationMaterials) department.patientEducationMaterials = [];
-        await db.addMaterial({ id: material.id, data: material.data! });
-        department.patientEducationMaterials.push({ ...material, data: undefined });
-        const { error } = await db.upsertDepartment(department, selectedHospitalId!);
-        if (error) alert(`Error: ${error.message}`); else refreshData();
-    }
-  };
+        
+        const newMaterial: TrainingMaterial = {
+            id: Date.now().toString(),
+            name: fileData.name,
+            type: fileData.type,
+            storagePath: path,
+            description: fileData.description
+        };
 
-  const handleDeletePatientEducationMaterial = async (materialId: string) => {
-    if (!selectedDepartmentId) return;
-    const hospital = findHospital(selectedHospitalId);
-    const department = findDepartment(hospital, selectedDepartmentId);
-    if (department?.patientEducationMaterials) {
-        department.patientEducationMaterials = department.patientEducationMaterials.filter(m => m.id !== materialId);
-        await db.deleteMaterial(materialId);
-        const { error } = await db.upsertDepartment(department, selectedHospitalId!);
-        if (error) alert(`Error: ${error.message}`); else refreshData();
-    }
-  };
+        monthlyTraining.materials.push(newMaterial);
+        const { error: saveError } = await db.upsertHospital(hospital);
+        if (saveError) alert(`Error: ${saveError.message}`); else refreshData();
+    };
+
+    const handleDeleteTrainingMaterial = async (month: string, materialId: string) => {
+        if (!selectedHospitalId) return;
+        const hospital = findHospital(selectedHospitalId);
+        if (hospital?.trainingMaterials) {
+            const monthlyTraining = hospital.trainingMaterials.find(t => t.month === month);
+            if (monthlyTraining) {
+                const materialToDelete = monthlyTraining.materials.find(m => m.id === materialId);
+                if (materialToDelete) {
+                    await db.deleteFile(materialToDelete.storagePath);
+                }
+                monthlyTraining.materials = monthlyTraining.materials.filter(m => m.id !== materialId);
+            }
+            const { error } = await db.upsertHospital(hospital);
+            if (error) alert(`Error: ${error.message}`); else refreshData();
+        }
+    };
+
+    const handleUpdateTrainingMaterialDescription = async (month: string, materialId: string, description: string) => {
+        if (!selectedHospitalId) return;
+        const hospital = findHospital(selectedHospitalId);
+        if (hospital?.trainingMaterials) {
+            const material = hospital.trainingMaterials.flatMap(t => t.materials).find(m => m.id === materialId);
+            if (material) material.description = description;
+            const { error } = await db.upsertHospital(hospital);
+            if (error) alert(`Error: ${error.message}`); else refreshData();
+        }
+    };
+
+    const handleAddAccreditationMaterial = async (fileData: FileUploadData) => {
+        if (!selectedHospitalId) return;
+        const hospital = findHospital(selectedHospitalId);
+        if (hospital) {
+            const { path, error: uploadError } = await db.uploadFileFromDataUrl(fileData.dataUrl, fileData.name);
+            if (uploadError) { alert(`خطا در آپلود فایل: ${uploadError.message}`); return; }
+
+            if (!hospital.accreditationMaterials) hospital.accreditationMaterials = [];
+            const newMaterial: TrainingMaterial = { id: Date.now().toString(), name: fileData.name, type: fileData.type, storagePath: path, description: fileData.description };
+            hospital.accreditationMaterials.push(newMaterial);
+            const { error } = await db.upsertHospital(hospital);
+            if (error) alert(`Error: ${error.message}`); else refreshData();
+        }
+    };
   
-  const handleUpdatePatientEducationMaterialDescription = async (materialId: string, description: string) => {
-    if (!selectedDepartmentId) return;
-    const hospital = findHospital(selectedHospitalId);
-    const department = findDepartment(hospital, selectedDepartmentId);
-    if (department?.patientEducationMaterials) {
-        const material = department.patientEducationMaterials.find(m => m.id === materialId);
-        if (material) material.description = description;
-        const { error } = await db.upsertDepartment(department, selectedHospitalId!);
-        if (error) alert(`Error: ${error.message}`); else refreshData();
-    }
-  };
+    const handleDeleteAccreditationMaterial = async (materialId: string) => {
+        if (!selectedHospitalId) return;
+        const hospital = findHospital(selectedHospitalId);
+        if (hospital?.accreditationMaterials) {
+            const materialToDelete = hospital.accreditationMaterials.find(m => m.id === materialId);
+            if(materialToDelete) await db.deleteFile(materialToDelete.storagePath);
+            hospital.accreditationMaterials = hospital.accreditationMaterials.filter(m => m.id !== materialId);
+            const { error } = await db.upsertHospital(hospital);
+            if (error) alert(`Error: ${error.message}`); else refreshData();
+        }
+    };
+  
+    const handleUpdateAccreditationMaterialDescription = async (materialId: string, description: string) => {
+        if (!selectedHospitalId) return;
+        const hospital = findHospital(selectedHospitalId);
+        if (hospital?.accreditationMaterials) {
+            const material = hospital.accreditationMaterials.find(m => m.id === materialId);
+            if (material) material.description = description;
+            const { error } = await db.upsertHospital(hospital);
+            if (error) alert(`Error: ${error.message}`); else refreshData();
+        }
+    };
+
+    const handleAddNewsBanner = async (banner: Omit<NewsBanner, 'id' | 'imageStoragePath'>, fileData: FileUploadData) => {
+        if (!selectedHospitalId) return;
+        const hospital = findHospital(selectedHospitalId);
+        if (hospital) {
+            const { path, error: uploadError } = await db.uploadFileFromDataUrl(fileData.dataUrl, fileData.name);
+            if (uploadError) { alert(`خطا در آپلود فایل: ${uploadError.message}`); return; }
+            
+            if (!hospital.newsBanners) hospital.newsBanners = [];
+            const newBanner: NewsBanner = { ...banner, id: Date.now().toString(), imageStoragePath: path };
+            hospital.newsBanners.push(newBanner);
+            const { error } = await db.upsertHospital(hospital);
+            if (error) alert(`Error: ${error.message}`); else refreshData();
+        }
+    };
+
+    const handleDeleteNewsBanner = async (bannerId: string) => {
+        if (!selectedHospitalId) return;
+        const hospital = findHospital(selectedHospitalId);
+        if (hospital?.newsBanners) {
+            const banner = hospital.newsBanners.find(b => b.id === bannerId);
+            if (banner) await db.deleteFile(banner.imageStoragePath);
+            hospital.newsBanners = hospital.newsBanners.filter(b => b.id !== bannerId);
+            const { error } = await db.upsertHospital(hospital);
+            if (error) alert(`Error: ${error.message}`); else refreshData();
+        }
+    };
+
+    const handleUpdateNewsBanner = async (bannerId: string, title: string, description: string) => {
+        if (!selectedHospitalId) return;
+        const hospital = findHospital(selectedHospitalId);
+        if (hospital?.newsBanners) {
+            const banner = hospital.newsBanners.find(b => b.id === bannerId);
+            if (banner) { banner.title = title; banner.description = description; }
+            const { error } = await db.upsertHospital(hospital);
+            if (error) alert(`Error: ${error.message}`); else refreshData();
+        }
+    };
+  
+    const handleAddPatientEducationMaterial = async (fileData: FileUploadData) => {
+        if (!selectedDepartmentId) return;
+        const hospital = findHospital(selectedHospitalId);
+        const department = findDepartment(hospital, selectedDepartmentId);
+        if (department) {
+            const { path, error: uploadError } = await db.uploadFileFromDataUrl(fileData.dataUrl, fileData.name);
+            if (uploadError) { alert(`خطا در آپلود فایل: ${uploadError.message}`); return; }
+
+            if (!department.patientEducationMaterials) department.patientEducationMaterials = [];
+            const newMaterial: TrainingMaterial = { id: Date.now().toString(), name: fileData.name, type: fileData.type, storagePath: path, description: fileData.description };
+            department.patientEducationMaterials.push(newMaterial);
+            const { error } = await db.upsertDepartment(department, selectedHospitalId!);
+            if (error) alert(`Error: ${error.message}`); else refreshData();
+        }
+    };
+
+    const handleDeletePatientEducationMaterial = async (materialId: string) => {
+        if (!selectedDepartmentId) return;
+        const hospital = findHospital(selectedHospitalId);
+        const department = findDepartment(hospital, selectedDepartmentId);
+        if (department?.patientEducationMaterials) {
+            const material = department.patientEducationMaterials.find(m => m.id === materialId);
+            if(material) await db.deleteFile(material.storagePath);
+            department.patientEducationMaterials = department.patientEducationMaterials.filter(m => m.id !== materialId);
+            const { error } = await db.upsertDepartment(department, selectedHospitalId!);
+            if (error) alert(`Error: ${error.message}`); else refreshData();
+        }
+    };
+  
+    const handleUpdatePatientEducationMaterialDescription = async (materialId: string, description: string) => {
+        if (!selectedDepartmentId) return;
+        const hospital = findHospital(selectedHospitalId);
+        const department = findDepartment(hospital, selectedDepartmentId);
+        if (department?.patientEducationMaterials) {
+            const material = department.patientEducationMaterials.find(m => m.id === materialId);
+            if (material) material.description = description;
+            const { error } = await db.upsertDepartment(department, selectedHospitalId!);
+            if (error) alert(`Error: ${error.message}`); else refreshData();
+        }
+    };
 
   const handleAddPatient = async (name: string, nationalId: string, password?: string) => {
     if (!selectedDepartmentId) return;
@@ -552,41 +588,43 @@ const App: React.FC = () => {
     }
   };
 
-  const handleManagerSendMessage = async (patientId: string, content: { text?: string; file?: { id: string; name: string; type: string; } }, sender: 'patient' | 'manager') => {
-    if (!selectedDepartmentId) return;
-    const hospital = findHospital(selectedHospitalId);
-    const department = findDepartment(hospital, selectedDepartmentId);
-    const patient = department?.patients?.find(p => p.id === patientId);
-    if (patient) {
-        if (!patient.chatHistory) patient.chatHistory = [];
-        const newMessage: ChatMessage = { id: Date.now().toString(), sender, timestamp: new Date().toISOString(), ...content };
-        patient.chatHistory.push(newMessage);
-        const { error } = await db.upsertDepartment(department!, selectedHospitalId!);
-        if (error) alert(`Error: ${error.message}`); else refreshData();
-    }
+  const handleChatMessageSend = async (hospitalId: string, departmentId: string, patientId: string, sender: 'patient' | 'manager', content: { text?: string; fileData?: FileUploadData }) => {
+      const hospital = findHospital(hospitalId);
+      const department = findDepartment(hospital, departmentId);
+      const patient = department?.patients?.find(p => p.id === patientId);
+      if (!patient) return;
+
+      let fileInfo: ChatMessage['file'] | undefined;
+      if (content.fileData) {
+          const { path, error } = await db.uploadFileFromDataUrl(content.fileData.dataUrl, content.fileData.name);
+          if (error) { alert(`خطا در آپلود فایل: ${error.message}`); return; }
+          fileInfo = { id: `file-${Date.now()}`, name: content.fileData.name, type: content.fileData.type, storagePath: path };
+      }
+
+      if (!patient.chatHistory) patient.chatHistory = [];
+      const newMessage: ChatMessage = { id: Date.now().toString(), sender, timestamp: new Date().toISOString(), text: content.text, file: fileInfo };
+      patient.chatHistory.push(newMessage);
+
+      const { error } = await db.upsertDepartment(department!, hospitalId);
+      if (error) alert(`خطا در ارسال پیام: ${error.message}`); else refreshData();
   };
 
-  const handleHospitalSendMessage = async (content: { text?: string; file?: { id: string; name: string; type: string; } }) => {
-    if (!selectedHospitalId) return;
-    const hospital = findHospital(selectedHospitalId);
-    if (hospital) {
-        if (!hospital.adminMessages) hospital.adminMessages = [];
-        const newMessage: AdminMessage = { id: Date.now().toString(), sender: 'hospital', timestamp: new Date().toISOString(), ...content };
-        hospital.adminMessages.push(newMessage);
-        const { error } = await db.upsertHospital(hospital);
-        if (error) alert(`Error: ${error.message}`); else refreshData();
-    }
-  };
+  const handleAdminOrHospitalMessageSend = async (hospitalId: string, sender: 'hospital' | 'admin', content: { text?: string; fileData?: FileUploadData }) => {
+      const hospital = findHospital(hospitalId);
+      if (!hospital) return;
 
-  const handleAdminSendMessage = async (hospitalId: string, content: { text?: string; file?: { id: string; name: string; type: string; } }) => {
-    const hospital = findHospital(hospitalId);
-    if (hospital) {
-        if (!hospital.adminMessages) hospital.adminMessages = [];
-        const newMessage: AdminMessage = { id: Date.now().toString(), sender: 'admin', timestamp: new Date().toISOString(), ...content };
-        hospital.adminMessages.push(newMessage);
-        const { error } = await db.upsertHospital(hospital);
-        if (error) alert(`Error: ${error.message}`); else refreshData();
-    }
+      let fileInfo: AdminMessage['file'] | undefined;
+      if (content.fileData) {
+          const { path, error } = await db.uploadFileFromDataUrl(content.fileData.dataUrl, content.fileData.name);
+          if (error) { alert(`خطا در آپلود فایل: ${error.message}`); return; }
+          fileInfo = { id: `file-${Date.now()}`, name: content.fileData.name, type: content.fileData.type, storagePath: path };
+      }
+
+      if (!hospital.adminMessages) hospital.adminMessages = [];
+      const newMessage: AdminMessage = { id: Date.now().toString(), sender, timestamp: new Date().toISOString(), text: content.text, file: fileInfo };
+      hospital.adminMessages.push(newMessage);
+      const { error } = await db.upsertHospital(hospital);
+      if (error) alert(`Error: ${error.message}`); else refreshData();
   };
 
   const handleUpdateNeedsAssessmentTopics = async (month: string, topics: NeedsAssessmentTopic[]) => {
@@ -606,6 +644,44 @@ const App: React.FC = () => {
     }
   };
 
+  const handleReplaceHospitalData = async (hospitalData: Hospital) => {
+    const allHospitals = [...hospitals];
+    const hospitalIndex = allHospitals.findIndex(h => h.id === hospitalData.id);
+    if (hospitalIndex === -1) {
+        alert('بیمارستان مورد نظر در پایگاه داده یافت نشد.');
+        return;
+    }
+    allHospitals[hospitalIndex] = hospitalData;
+    const { error } = await db.saveAllHospitals(allHospitals);
+    if (error) {
+        alert(`خطا در ذخیره اطلاعات بیمارستان: ${error.message}`);
+    } else {
+        alert('اطلاعات بیمارستان با موفقیت بارگذاری شد.');
+        setHospitals(allHospitals);
+    }
+  };
+
+  const handleReplaceDepartmentData = async (hospitalId: string, departmentData: Department) => {
+      const allHospitals = [...hospitals];
+      const hospital = allHospitals.find(h => h.id === hospitalId);
+      if (!hospital) {
+          alert('بیمارستان مورد نظر یافت نشد.');
+          return;
+      }
+      const departmentIndex = hospital.departments.findIndex(d => d.id === departmentData.id);
+      if (departmentIndex === -1) {
+          alert('بخش مورد نظر در این بیمارستان یافت نشد.');
+          return;
+      }
+      hospital.departments[departmentIndex] = departmentData;
+      const { error } = await db.saveAllHospitals(allHospitals);
+      if (error) {
+          alert(`خطا در ذخیره اطلاعات بخش: ${error.message}`);
+      } else {
+          alert('اطلاعات بخش با موفقیت بارگذاری شد.');
+          setHospitals(allHospitals);
+      }
+  };
 
   // --- Navigation & Auth ---
    const handleGoToWelcome = () => {
@@ -715,39 +791,73 @@ const App: React.FC = () => {
       handleGoToWelcome();
   };
 
-  // --- Data Handlers for JSON import/export ---
-  const handleSaveData = async () => {
-      const allFiles = await db.getAllMaterials();
-      const dataToSave = { type: 'full_backup', hospitals, files: allFiles };
-      const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(dataToSave, null, 2))}`;
-      const link = document.createElement('a');
-      link.href = jsonString;
-      link.download = `skill_assessment_backup_${new Date().toISOString().split('T')[0]}.json`;
-      link.click();
+  // --- Data Handlers for Backups ---
+  const handleSaveData = () => {
+      if (currentView === View.DepartmentList) {
+        const hospital = findHospital(selectedHospitalId);
+        if (!hospital) return;
+        const dataToSave = { type: 'hospital_backup', hospitalId: hospital.id, data: hospital };
+        const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(dataToSave, null, 2))}`;
+        const link = document.createElement('a');
+        link.href = jsonString;
+        link.download = `پشتیبان_بیمارستان_${hospital.name.replace(/\s/g, '_')}.json`;
+        link.click();
+      } else if (currentView === View.DepartmentView) {
+        const department = findDepartment(findHospital(selectedHospitalId), selectedDepartmentId);
+        if (!department) return;
+        const dataToSave = { type: 'department_backup', hospitalId: selectedHospitalId, departmentId: department.id, data: department };
+        const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(dataToSave, null, 2))}`;
+        const link = document.createElement('a');
+        link.href = jsonString;
+        link.download = `پشتیبان_بخش_${department.name.replace(/\s/g, '_')}.json`;
+        link.click();
+      } else { // Admin Full Backup
+        const dataToSave = { type: 'full_backup_metadata_only', hospitals };
+        const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(dataToSave, null, 2))}`;
+        const link = document.createElement('a');
+        link.href = jsonString;
+        link.download = `skill_assessment_backup_${new Date().toISOString().split('T')[0]}.json`;
+        link.click();
+      }
   };
 
   const handleLoadData = (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
-      if (file) {
-          const reader = new FileReader();
-          reader.onload = async (e) => {
-              try {
-                  const loadedData = JSON.parse(e.target?.result as string);
-                  if (loadedData.type !== 'full_backup' || !Array.isArray(loadedData.hospitals)) throw new Error('فایل پشتیبان معتبر نیست.');
-                  
-                  if (window.confirm('آیا مطمئن هستید که می‌خواهید تمام داده‌های فعلی را با اطلاعات این فایل جایگزین کنید؟ این عمل غیرقابل بازگشت است.')) {
-                      await db.clearAllMaterials();
-                      if(loadedData.files) await db.bulkPutFiles(loadedData.files);
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+          try {
+              const loadedData = JSON.parse(e.target?.result as string);
+              if (currentView === View.DepartmentList) {
+                  const hospital = findHospital(selectedHospitalId);
+                  if (loadedData.type !== 'hospital_backup') throw new Error('این فایل، یک فایل پشتیبان معتبر برای بیمارستان نیست.');
+                  if (loadedData.hospitalId !== hospital?.id) throw new Error(`این فایل متعلق به بیمارستان دیگری است.`);
+                  if (window.confirm('آیا مطمئن هستید که می‌خواهید تمام داده‌های فعلی این بیمارستان را با اطلاعات این فایل جایگزین کنید؟')) {
+                      handleReplaceHospitalData(loadedData.data);
+                  }
+              } else if (currentView === View.DepartmentView) {
+                  const department = findDepartment(findHospital(selectedHospitalId), selectedDepartmentId);
+                  if (loadedData.type !== 'department_backup') throw new Error('این فایل، یک فایل پشتیبان معتبر برای بخش نیست.');
+                  if (loadedData.departmentId !== department?.id) throw new Error(`این فایل متعلق به بخش دیگری است.`);
+                  if (window.confirm('آیا مطمئن هستید که می‌خواهید تمام داده‌های فعلی این بخش را با اطلاعات این فایل جایگزین کنید؟')) {
+                      handleReplaceDepartmentData(selectedHospitalId!, loadedData.data);
+                  }
+              } else { // Admin Full Load
+                  if (loadedData.type !== 'full_backup_metadata_only' || !Array.isArray(loadedData.hospitals)) throw new Error('فایل پشتیبان معتبر نیست.');
+                  if (window.confirm('آیا مطمئن هستید که می‌خواهید تمام داده‌های فعلی را با اطلاعات این فایل جایگزین کنید؟')) {
                       await db.saveAllHospitals(loadedData.hospitals);
                       alert('داده‌ها با موفقیت از فایل پشتیبان بازیابی شدند.');
                       refreshData();
                   }
-              } catch (error) {
-                  alert(`خطا در بارگذاری فایل. ${error instanceof Error ? error.message : ''}`);
               }
-          };
-          reader.readAsText(file);
-      }
+          } catch (error) {
+              alert(`خطا در بارگذاری فایل: ${error instanceof Error ? error.message : 'فرمت فایل نامعتبر است.'}`);
+          } finally {
+              if (event.target) event.target.value = '';
+          }
+      };
+      reader.readAsText(file);
   };
 
   const renderContent = () => {
@@ -768,6 +878,11 @@ const App: React.FC = () => {
 
     if (appScreen === AppScreen.HospitalList) {
       if (loggedInUser.role !== UserRole.Admin) return renderUnauthorized();
+
+      if (currentView === View.AdminCommunication) {
+        return <AdminCommunicationView hospitals={hospitals} onSendMessage={(hospitalId, content) => handleAdminOrHospitalMessageSend(hospitalId, 'admin', content)} onBack={handleBack} onRefreshChat={refreshData} />;
+      }
+      
       return <HospitalList
         hospitals={hospitals}
         onAddHospital={handleAddHospital}
@@ -775,7 +890,16 @@ const App: React.FC = () => {
             const hospital = findHospital(id);
             if(hospital) await db.upsertHospital({ ...hospital, ...data }).then(res => !res.error && refreshData());
         }}
-        onDeleteHospital={async (id) => await db.deleteHospital(id).then(res => !res.error && refreshData())}
+        onDeleteHospital={async (id) => {
+            setIsLoading(true);
+            const { error } = await db.deleteHospital(id);
+            if (error) {
+                alert(`خطا در حذف بیمارستان: ${error.message}`);
+                setIsLoading(false);
+            } else {
+                await refreshData();
+            }
+        }}
         onSelectHospital={handleSelectHospital}
         onGoToWelcome={handleGoToWelcome}
         userRole={loggedInUser.role}
@@ -793,22 +917,25 @@ const App: React.FC = () => {
     switch (currentView) {
       case View.DepartmentList:
         return <DepartmentList
-          departments={selectedHospital.departments} hospitalName={selectedHospital.name} onAddDepartment={handleAddDepartment} onUpdateDepartment={handleUpdateDepartment}
+          hospital={selectedHospital}
+          onAddDepartment={handleAddDepartment}
+          onUpdateDepartment={handleUpdateDepartment}
           onDeleteDepartment={async (id) => await db.deleteDepartment(id).then(res => !res.error && refreshData())}
           onSelectDepartment={handleSelectDepartment} onBack={handleBack} onManageAccreditation={() => setCurrentView(View.AccreditationManager)}
           onManageNewsBanners={() => setCurrentView(View.NewsBannerManager)} onManageNeedsAssessment={() => setCurrentView(View.NeedsAssessmentManager)}
           onResetHospital={handleResetHospital} onContactAdmin={() => setCurrentView(View.HospitalCommunication)}
-          onArchiveYear={handleArchiveYear} userRole={loggedInUser.role}
+          onArchiveYear={handleArchiveYear} userRole={loggedInUser.role} onReplaceHospitalData={handleReplaceHospitalData}
         />;
       case View.DepartmentView:
         if (!selectedDepartment) return <div>Department not found.</div>;
         return <DepartmentView
-          department={selectedDepartment} onBack={handleBack} onAddStaff={handleAddStaff} onUpdateStaff={handleUpdateStaff}
+          department={selectedDepartment} hospitalId={selectedHospital.id} onBack={handleBack} onAddStaff={handleAddStaff} onUpdateStaff={handleUpdateStaff}
           onDeleteStaff={async (deptId, staffId) => await db.deleteStaff(staffId).then(res => !res.error && refreshData())}
           onSelectStaff={handleSelectStaff} onComprehensiveImport={handleComprehensiveImport}
           onManageChecklists={() => setCurrentView(View.ChecklistManager)} onManageExams={() => setCurrentView(View.ExamManager)}
           onManageTraining={() => setCurrentView(View.TrainingManager)} onManagePatientEducation={() => setCurrentView(View.PatientEducationManager)}
-          onAddOrUpdateWorkLog={handleAddOrUpdateWorkLog} userRole={loggedInUser.role} newsBanners={selectedHospital.newsBanners || []} activeYear={activeYear}
+          onAddOrUpdateWorkLog={handleAddOrUpdateWorkLog} onReplaceDepartmentData={handleReplaceDepartmentData}
+          userRole={loggedInUser.role} newsBanners={selectedHospital.newsBanners || []} activeYear={activeYear}
         />;
       case View.StaffMemberView:
         if (!selectedDepartment || !selectedStaffMember) return <div>Staff not found.</div>;
@@ -833,23 +960,30 @@ const App: React.FC = () => {
         return <NewsBannerManager banners={selectedHospital.newsBanners || []} onAddBanner={handleAddNewsBanner} onUpdateBanner={handleUpdateNewsBanner} onDeleteBanner={handleDeleteNewsBanner} onBack={handleBack} />;
       case View.PatientEducationManager:
         if (!selectedDepartment) return <div>Department not found.</div>;
-        return <PatientEducationManager department={selectedDepartment} onAddMaterial={handleAddPatientEducationMaterial} onDeleteMaterial={handleDeletePatientEducationMaterial} onUpdateMaterialDescription={handleUpdatePatientEducationMaterialDescription} onAddPatient={handleAddPatient} onDeletePatient={handleDeletePatient} onSendMessage={handleManagerSendMessage} onBack={handleBack} />;
+        return <PatientEducationManager department={selectedDepartment} onAddMaterial={handleAddPatientEducationMaterial} onDeleteMaterial={handleDeletePatientEducationMaterial} onUpdateMaterialDescription={handleUpdatePatientEducationMaterialDescription} onAddPatient={handleAddPatient} onDeletePatient={handleDeletePatient} onSendMessage={(patientId, content, sender) => handleChatMessageSend(selectedHospital.id, selectedDepartment.id, patientId, sender, content)} onBack={handleBack} onRefreshChat={refreshData} />;
       case View.PatientPortal:
         if (loggedInUser.role !== UserRole.Patient) return renderUnauthorized();
         const dept = findDepartment(findHospital(loggedInUser.hospitalId!), loggedInUser.departmentId!);
         const patient = dept?.patients?.find(p => p.id === loggedInUser.patientId!);
         if (!dept || !patient) return <div>اطلاعات بیمار یافت نشد.</div>;
-        return <PatientPortalView department={dept} patient={patient} onSendMessage={(content) => handlePatientSendMessage(patient.id, content)} />;
+        return <PatientPortalView department={dept} patient={patient} onSendMessage={(content) => handleChatMessageSend(loggedInUser.hospitalId!, loggedInUser.departmentId!, patient.id, 'patient', content)} onRefreshChat={refreshData} />;
       case View.HospitalCommunication:
-        return <HospitalCommunicationView hospital={selectedHospital} onSendMessage={handleHospitalSendMessage} onBack={handleBack} />;
+        return <HospitalCommunicationView hospital={selectedHospital} onSendMessage={(content) => handleAdminOrHospitalMessageSend(selectedHospital.id, 'hospital', content)} onBack={handleBack} onRefreshChat={refreshData} />;
       case View.AdminCommunication:
-        return <AdminCommunicationView hospitals={hospitals} onSendMessage={handleAdminSendMessage} onBack={handleBack} />;
+        if (loggedInUser.role !== UserRole.Admin) return renderUnauthorized();
+        return <AdminCommunicationView hospitals={hospitals} onSendMessage={(hospitalId, content) => handleAdminOrHospitalMessageSend(hospitalId, 'admin', content)} onBack={handleBack} onRefreshChat={refreshData} />;
       case View.NeedsAssessmentManager:
         return <NeedsAssessmentManager hospital={selectedHospital} onUpdateTopics={handleUpdateNeedsAssessmentTopics} onBack={handleBack} activeYear={activeYear} />;
       default:
         return <div>Unhandled view state.</div>;
     }
   };
+
+  const showBackupButtons = loggedInUser && (
+    (loggedInUser.role === UserRole.Admin && appScreen === AppScreen.HospitalList) ||
+    ((loggedInUser.role === UserRole.Admin || loggedInUser.role === UserRole.Supervisor) && currentView === View.DepartmentList) ||
+    ((loggedInUser.role === UserRole.Admin || loggedInUser.role === UserRole.Supervisor || loggedInUser.role === UserRole.Manager) && currentView === View.DepartmentView)
+  );
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
@@ -872,7 +1006,7 @@ const App: React.FC = () => {
                             <span className="hidden sm:inline">درباره</span>
                         </button>
                         
-                        {loggedInUser?.role === UserRole.Admin && (
+                        {showBackupButtons && (
                             <>
                                 <button onClick={handleSaveData} className="flex items-center gap-2 px-3 py-1.5 text-sm font-semibold text-white bg-green-500 rounded-lg shadow-sm hover:bg-green-600 transition-colors" aria-label="ذخیره پشتیبان">
                                     <SaveIcon className="w-5 h-5"/>
@@ -881,7 +1015,7 @@ const App: React.FC = () => {
                                 <label className="flex items-center gap-2 px-3 py-1.5 text-sm font-semibold text-white bg-orange-500 rounded-lg shadow-sm hover:bg-orange-600 transition-colors cursor-pointer" aria-label="بارگذاری پشتیبان">
                                     <UploadIcon className="w-5 h-5"/>
                                     <span className="hidden sm:inline">بارگذاری</span>
-                                    <input type="file" accept=".json" onChange={handleLoadData} className="hidden"/>
+                                    <input type="file" accept=".json" onChange={handleLoadData} ref={fileInputRef} className="hidden"/>
                                 </label>
                             </>
                         )}
@@ -898,11 +1032,12 @@ const App: React.FC = () => {
                 </div>
             </header>
         )}
-        <main className={appScreen === AppScreen.Welcome ? '' : 'container mx-auto'}>
+        <main className={`container mx-auto ${appScreen !== AppScreen.Welcome ? 'pb-16' : ''}`}>
           <Suspense fallback={<LoadingSpinner />}>
             {renderContent()}
           </Suspense>
         </main>
+        {appScreen !== AppScreen.Welcome && <Footer />}
         <AboutModal isOpen={isAboutModalOpen} onClose={() => setIsAboutModalOpen(false)} />
         <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} onLogin={handleLogin} loginError={loginError} />
     </div>
