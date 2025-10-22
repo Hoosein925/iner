@@ -1,4 +1,4 @@
-import { Hospital, LoggedInUser, UserRole } from '../types';
+import { Hospital, LoggedInUser, UserRole, Department, StaffMember, Assessment, TrainingMaterial, NewsBanner, Patient, ChatMessage, AdminMessage, NeedsAssessmentTopic } from '../types';
 import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 
 const supabaseUrl = 'https://etpitgyohgpbygyfgeyt.supabase.co'
@@ -167,10 +167,12 @@ export const saveAllHospitals = async (hospitals: Hospital[]): Promise<{ error: 
     }
 };
 
-const getHospitals = (): Hospital[] => getHospitalsFromLocal();
+// ===================================================================
+//  ATOMIC WRITE OPERATIONS (Read-Modify-Write)
+// ===================================================================
 
 export const upsertHospital = async (hospital: Hospital): Promise<{ error: Error | null }> => {
-    const hospitals = getHospitals();
+    const hospitals = await syncAndAssembleData();
     const index = hospitals.findIndex(h => h.id === hospital.id);
     if (index > -1) hospitals[index] = hospital; else hospitals.push(hospital);
     return saveAllHospitals(hospitals);
@@ -183,35 +185,21 @@ export const deleteHospital = async (hospitalId: string): Promise<{ error: Error
 
         if (!hospitalToDelete) {
             console.warn(`Attempted to delete hospital with ID ${hospitalId}, but it was not found.`);
-            return { error: null }; // Already gone.
+            return { error: null };
         }
 
         const expectedHospitalsAfterDelete = allHospitalsBeforeDelete.filter(h => h.id !== hospitalId);
-
         const saveResult = await saveAllHospitals(expectedHospitalsAfterDelete);
 
-        if (saveResult.error) {
-            return saveResult;
-        }
+        if (saveResult.error) return saveResult;
 
-        // --- VERIFICATION STEP ---
+        // VERIFICATION and Cleanup
         const actualHospitalsAfterDelete = await syncAndAssembleData();
-        const isStillPresent = actualHospitalsAfterDelete.some(h => h.id === hospitalId);
-        
-        if (isStillPresent) {
-            try {
-                localStorage.setItem(HOSPITALS_KEY, JSON.stringify(actualHospitalsAfterDelete));
-            } catch (e) { console.error("Failed to revert localStorage state.", e); }
-
-            const rlsError = new Error(
-                'عملیات حذف در پایگاه داده ناموفق بود. داده‌ها به حالت اولیه بازگردانده شدند.\n\n' +
-                'علت احتمالی: این مشکل معمولاً به دلیل خط‌مشی‌های امنیتی (Row Level Security) در Supabase رخ می‌دهد که اجازه حذف یا ویرایش داده را نمی‌دهد.\n\n' +
-                'راه‌حل: لطفاً وارد پنل Supabase خود شوید و یک پالیسی برای اجازه عملیات "UPDATE" و "INSERT" روی جدول "hospitals_json" تعریف کنید.'
-            );
-            return { error: rlsError };
+        if (actualHospitalsAfterDelete.some(h => h.id === hospitalId)) {
+            localStorage.setItem(HOSPITALS_KEY, JSON.stringify(actualHospitalsAfterDelete));
+            return { error: new Error('حذف از پایگاه داده ناموفق بود. علت احتمالی: خط‌مشی‌های امنیتی (RLS).') };
         }
 
-        // If deletion was successful, handle file cleanup in the background.
         (async () => {
             const pathsToDelete: string[] = [];
             hospitalToDelete.accreditationMaterials?.forEach(m => m.storagePath && pathsToDelete.push(m.storagePath));
@@ -219,103 +207,60 @@ export const deleteHospital = async (hospitalId: string): Promise<{ error: Error
             hospitalToDelete.trainingMaterials?.forEach(tm => tm.materials.forEach(m => m.storagePath && pathsToDelete.push(m.storagePath)));
             hospitalToDelete.departments.forEach(d => {
                 d.patientEducationMaterials?.forEach(m => m.storagePath && pathsToDelete.push(m.storagePath));
-                d.patients?.forEach(p => {
-                    p.chatHistory?.forEach(c => {
-                        if (c.file?.storagePath) pathsToDelete.push(c.file.storagePath);
-                    });
-                });
+                d.patients?.forEach(p => p.chatHistory?.forEach(c => c.file?.storagePath && pathsToDelete.push(c.file.storagePath)));
             });
-
-            const validPaths = pathsToDelete.filter(p => p);
-            if (validPaths.length > 0) {
-                console.log(`(Background) Deleting ${validPaths.length} associated files for hospital ${hospitalId}...`);
-                const { error: deleteError } = await supabase.storage.from(BUCKET_NAME).remove(validPaths);
-                if (deleteError) {
-                    console.error(`(Background) Could not delete files for hospital ${hospitalId}:`, deleteError);
-                }
-            }
-        })();
-
-        return { error: null }; // Success
-
-    } catch (e) {
-        console.error("An unexpected error occurred in deleteHospital:", e);
-        return { error: e instanceof Error ? e : new Error("یک خطای ناشناخته در فرآیند حذف رخ داد.") };
-    }
-};
-
-export const resetHospitalDepartments = async (hospitalId: string): Promise<{ error: Error | null }> => {
-    try {
-        const allHospitalsBeforeReset = await syncAndAssembleData();
-        const hospitalToUpdate = allHospitalsBeforeReset.find(h => h.id === hospitalId);
-
-        if (!hospitalToUpdate) {
-            return { error: new Error(`Hospital with ID ${hospitalId} not found for reset.`) };
-        }
-        
-        if (hospitalToUpdate.departments.length === 0) {
-            return { error: null }; // Nothing to do.
-        }
-
-        const updatedHospitals = JSON.parse(JSON.stringify(allHospitalsBeforeReset));
-        const hospitalToReset = updatedHospitals.find((h: Hospital) => h.id === hospitalId)!;
-        
-        const pathsToDelete: string[] = [];
-        hospitalToReset.departments.forEach((d: any) => {
-            d.patientEducationMaterials?.forEach((m: any) => m.storagePath && pathsToDelete.push(m.storagePath));
-            d.patients?.forEach((p: any) => {
-                p.chatHistory?.forEach((c: any) => {
-                    if (c.file?.storagePath) pathsToDelete.push(c.file.storagePath);
-                });
-            });
-        });
-        
-        hospitalToReset.departments = [];
-        
-        const saveResult = await saveAllHospitals(updatedHospitals);
-
-        if (saveResult.error) {
-            return saveResult;
-        }
-
-        // --- VERIFICATION STEP ---
-        const actualHospitalsAfterReset = await syncAndAssembleData();
-        const actualHospitalState = actualHospitalsAfterReset.find(h => h.id === hospitalId);
-
-        if (actualHospitalState && actualHospitalState.departments.length > 0) {
-            try {
-                localStorage.setItem(HOSPITALS_KEY, JSON.stringify(actualHospitalsAfterReset));
-            } catch (e) { console.error("Failed to revert localStorage state.", e); }
-
-            const rlsError = new Error(
-                'عملیات ریست در پایگاه داده ناموفق بود. داده‌ها به حالت اولیه بازگردانده شدند.\n\n' +
-                'علت احتمالی: این مشکل معمولاً به دلیل خط‌مشی‌های امنیتی (Row Level Security) در Supabase رخ می‌دهد که اجازه ویرایش داده را نمی‌دهد.\n\n' +
-                'راه‌حل: لطفاً وارد پنل Supabase خود شوید و یک پالیسی برای اجازه عملیات "UPDATE" روی جدول "hospitals_json" تعریف کنید.'
-            );
-            return { error: rlsError };
-        }
-
-        // Background file deletion on success
-        (async () => {
-            const validPaths = pathsToDelete.filter(p => p);
-            if (validPaths.length > 0) {
-                console.log(`(Background) Deleting ${validPaths.length} associated files for departments in hospital ${hospitalId}...`);
-                 const { error: deleteError } = await supabase.storage.from(BUCKET_NAME).remove(validPaths);
-                 if (deleteError) {
-                    console.error(`(Background) Could not delete associated files during hospital reset for ${hospitalId}:`, deleteError);
-                 }
+            if (pathsToDelete.length > 0) {
+                console.log(`(Background) Deleting ${pathsToDelete.length} files for hospital ${hospitalId}`);
+                await supabase.storage.from(BUCKET_NAME).remove(pathsToDelete);
             }
         })();
 
         return { error: null };
     } catch (e) {
-        console.error("An unexpected error occurred in resetHospitalDepartments:", e);
-        return { error: e instanceof Error ? e : new Error("یک خطای ناشناخته در فرآیند ریست کردن بیمارستان رخ داد.") };
+        return { error: e instanceof Error ? e : new Error("خطای غیرمنتظره در حذف بیمارستان رخ داد.") };
+    }
+};
+
+export const resetHospitalDepartments = async (hospitalId: string): Promise<{ error: Error | null }> => {
+    try {
+        const allHospitals = await syncAndAssembleData();
+        const hospitalToUpdate = allHospitals.find(h => h.id === hospitalId);
+        if (!hospitalToUpdate) return { error: new Error(`Hospital not found for reset.`) };
+        if (hospitalToUpdate.departments.length === 0) return { error: null };
+
+        const pathsToDelete: string[] = [];
+        hospitalToUpdate.departments.forEach(d => {
+            d.patientEducationMaterials?.forEach(m => m.storagePath && pathsToDelete.push(m.storagePath));
+            d.patients?.forEach(p => p.chatHistory?.forEach(c => c.file?.storagePath && pathsToDelete.push(c.file.storagePath)));
+        });
+        
+        hospitalToUpdate.departments = [];
+        
+        const saveResult = await saveAllHospitals(allHospitals);
+        if (saveResult.error) return saveResult;
+
+        // VERIFICATION and Cleanup
+        const actualHospitals = await syncAndAssembleData();
+        const actualHospitalState = actualHospitals.find(h => h.id === hospitalId);
+        if (actualHospitalState && actualHospitalState.departments.length > 0) {
+             localStorage.setItem(HOSPITALS_KEY, JSON.stringify(actualHospitals));
+             return { error: new Error('ریست کردن در پایگاه داده ناموفق بود. علت احتمالی: خط‌مشی‌های امنیتی (RLS).') };
+        }
+        
+        if (pathsToDelete.length > 0) {
+            (async () => {
+                console.log(`(Background) Deleting ${pathsToDelete.length} files during hospital reset.`);
+                await supabase.storage.from(BUCKET_NAME).remove(pathsToDelete);
+            })();
+        }
+        return { error: null };
+    } catch (e) {
+        return { error: e instanceof Error ? e : new Error("خطای غیرمنتظره در ریست کردن بیمارستان رخ داد.") };
     }
 }
 
-export const upsertDepartment = async (department: Hospital['departments'][0], hospitalId: string): Promise<{ error: Error | null }> => {
-    const hospitals = getHospitals();
+export const upsertDepartment = async (department: Department, hospitalId: string): Promise<{ error: Error | null }> => {
+    const hospitals = await syncAndAssembleData();
     const hospital = hospitals.find(h => h.id === hospitalId);
     if (!hospital) return { error: new Error("Hospital not found") };
     const deptIndex = hospital.departments.findIndex(d => d.id === department.id);
@@ -324,13 +269,32 @@ export const upsertDepartment = async (department: Hospital['departments'][0], h
 };
 
 export const deleteDepartment = async (departmentId: string): Promise<{ error: Error | null }> => {
-    const hospitals = getHospitals();
-    hospitals.forEach(h => { h.departments = h.departments.filter(d => d.id !== departmentId); });
-    return saveAllHospitals(hospitals);
+    const hospitals = await syncAndAssembleData();
+    let departmentToDelete: Department | undefined;
+    
+    hospitals.forEach(h => {
+        const dept = h.departments.find(d => d.id === departmentId);
+        if(dept) departmentToDelete = dept;
+        h.departments = h.departments.filter(d => d.id !== departmentId);
+    });
+
+    const saveResult = await saveAllHospitals(hospitals);
+
+    if (!saveResult.error && departmentToDelete) {
+        (async () => {
+            const pathsToDelete: string[] = [];
+            departmentToDelete.patientEducationMaterials?.forEach(m => m.storagePath && pathsToDelete.push(m.storagePath));
+            departmentToDelete.patients?.forEach(p => p.chatHistory?.forEach(c => c.file?.storagePath && pathsToDelete.push(c.file.storagePath)));
+            if (pathsToDelete.length > 0) {
+                await supabase.storage.from(BUCKET_NAME).remove(pathsToDelete);
+            }
+        })();
+    }
+    return saveResult;
 };
 
-export const upsertStaff = async (staff: Hospital['departments'][0]['staff'][0], departmentId: string): Promise<{ error: Error | null }> => {
-    const hospitals = getHospitals();
+export const upsertStaff = async (staff: StaffMember, departmentId: string): Promise<{ error: Error | null }> => {
+    const hospitals = await syncAndAssembleData();
     for (const h of hospitals) {
         const department = h.departments.find(d => d.id === departmentId);
         if (department) {
@@ -343,17 +307,18 @@ export const upsertStaff = async (staff: Hospital['departments'][0]['staff'][0],
 };
 
 export const deleteStaff = async (staffId: string): Promise<{ error: Error | null }> => {
-    const hospitals = getHospitals();
+    const hospitals = await syncAndAssembleData();
     hospitals.forEach(h => { h.departments.forEach(d => { d.staff = d.staff.filter(s => s.id !== staffId); }); });
     return saveAllHospitals(hospitals);
 };
 
-export const upsertAssessment = async (assessment: Hospital['departments'][0]['staff'][0]['assessments'][0], staffId: string): Promise<{ error: Error | null }> => {
-    const hospitals = getHospitals();
+export const upsertAssessment = async (assessment: Assessment, staffId: string): Promise<{ error: Error | null }> => {
+    const hospitals = await syncAndAssembleData();
     for (const h of hospitals) {
         for (const d of h.departments) {
             const staff = d.staff.find(s => s.id === staffId);
             if (staff) {
+                if (!staff.assessments) staff.assessments = [];
                 const assessmentIndex = staff.assessments.findIndex(a => a.id === assessment.id);
                 if (assessmentIndex > -1) staff.assessments[assessmentIndex] = assessment; else staff.assessments.push(assessment);
                 return saveAllHospitals(hospitals);
@@ -362,6 +327,98 @@ export const upsertAssessment = async (assessment: Hospital['departments'][0]['s
     }
     return { error: new Error("Staff member not found") };
 };
+
+// ===================================================================
+//  GRANULAR ATOMIC OPERATIONS
+// ===================================================================
+
+const performAtomicUpdate = async (updateLogic: (hospitals: Hospital[]) => void): Promise<{ error: Error | null }> => {
+    try {
+        const hospitals = await syncAndAssembleData();
+        updateLogic(hospitals);
+        return saveAllHospitals(hospitals);
+    } catch (e) {
+        return { error: e instanceof Error ? e : new Error("An unexpected error occurred during the update.") };
+    }
+};
+
+export const addTrainingMaterial = (hospitalId: string, month: string, material: TrainingMaterial) => performAtomicUpdate(hospitals => {
+    const hospital = hospitals.find(h => h.id === hospitalId);
+    if (!hospital) throw new Error("Hospital not found");
+    if (!hospital.trainingMaterials) hospital.trainingMaterials = [];
+    let monthly = hospital.trainingMaterials.find(t => t.month === month);
+    if (!monthly) {
+        monthly = { month, materials: [] };
+        hospital.trainingMaterials.push(monthly);
+    }
+    monthly.materials.push(material);
+});
+
+export const addAccreditationMaterial = (hospitalId: string, material: TrainingMaterial) => performAtomicUpdate(hospitals => {
+    const hospital = hospitals.find(h => h.id === hospitalId);
+    if (!hospital) throw new Error("Hospital not found");
+    if (!hospital.accreditationMaterials) hospital.accreditationMaterials = [];
+    hospital.accreditationMaterials.push(material);
+});
+
+export const addNewsBanner = (hospitalId: string, banner: NewsBanner) => performAtomicUpdate(hospitals => {
+    const hospital = hospitals.find(h => h.id === hospitalId);
+    if (!hospital) throw new Error("Hospital not found");
+    if (!hospital.newsBanners) hospital.newsBanners = [];
+    hospital.newsBanners.push(banner);
+});
+
+export const addPatientEducationMaterial = (hospitalId: string, departmentId: string, material: TrainingMaterial) => performAtomicUpdate(hospitals => {
+    const department = hospitals.find(h => h.id === hospitalId)?.departments.find(d => d.id === departmentId);
+    if (!department) throw new Error("Department not found");
+    if (!department.patientEducationMaterials) department.patientEducationMaterials = [];
+    department.patientEducationMaterials.push(material);
+});
+
+export const addPatient = (hospitalId: string, departmentId: string, patient: Patient) => performAtomicUpdate(hospitals => {
+    const department = hospitals.find(h => h.id === hospitalId)?.departments.find(d => d.id === departmentId);
+    if (!department) throw new Error("Department not found");
+    if (!department.patients) department.patients = [];
+    department.patients.push(patient);
+});
+
+export const deletePatient = (hospitalId: string, departmentId: string, patientId: string) => performAtomicUpdate(hospitals => {
+    const department = hospitals.find(h => h.id === hospitalId)?.departments.find(d => d.id === departmentId);
+    if (department?.patients) {
+        department.patients = department.patients.filter(p => p.id !== patientId);
+    }
+});
+
+export const sendChatMessage = (hospitalId: string, departmentId: string, patientId: string, message: ChatMessage) => performAtomicUpdate(hospitals => {
+    const patient = hospitals.find(h => h.id === hospitalId)?.departments.find(d => d.id === departmentId)?.patients?.find(p => p.id === patientId);
+    if (!patient) throw new Error("Patient not found");
+    if (!patient.chatHistory) patient.chatHistory = [];
+    patient.chatHistory.push(message);
+});
+
+export const sendAdminMessage = (hospitalId: string, message: AdminMessage) => performAtomicUpdate(hospitals => {
+    const hospital = hospitals.find(h => h.id === hospitalId);
+    if (!hospital) throw new Error("Hospital not found");
+    if (!hospital.adminMessages) hospital.adminMessages = [];
+    hospital.adminMessages.push(message);
+});
+
+export const updateNeedsAssessmentTopics = (hospitalId: string, month: string, year: number, topics: NeedsAssessmentTopic[]) => performAtomicUpdate(hospitals => {
+    const hospital = hospitals.find(h => h.id === hospitalId);
+    if (!hospital) throw new Error("Hospital not found");
+    if (!hospital.needsAssessments) hospital.needsAssessments = [];
+    let assessment = hospital.needsAssessments.find(na => na.month === month && na.year === year);
+    if (assessment) {
+        assessment.topics = topics;
+    } else {
+        hospital.needsAssessments.push({ month, year, topics });
+    }
+});
+
+
+// ===================================================================
+//  USER AUTH
+// ===================================================================
 
 export const findUser = (hospitals: Hospital[], nationalId: string, password: string): LoggedInUser | null => {
   if (nationalId === '5850008985' && password === '64546') {
