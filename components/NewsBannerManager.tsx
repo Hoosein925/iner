@@ -8,7 +8,7 @@ import * as db from '../services/db';
 
 interface NewsBannerManagerProps {
   banners: NewsBanner[];
-  onAddBanner: (banner: Omit<NewsBanner, 'id' | 'imageId'>, file: File, imageData: string) => void;
+  onAddBanner: (banner: Omit<NewsBanner, 'id' | 'imageStoragePath'>, fileData: { name: string, type: string, dataUrl: string }) => void;
   onUpdateBanner: (bannerId: string, title: string, description: string) => void;
   onDeleteBanner: (bannerId: string) => void;
   onBack: () => void;
@@ -28,17 +28,14 @@ const NewsBannerManager: React.FC<NewsBannerManagerProps> = ({ banners, onAddBan
     const [bannerImages, setBannerImages] = useState<{[key: string]: string}>({});
 
     useEffect(() => {
-        const fetchImages = async () => {
-            const images: {[key: string]: string} = {};
-            for (const banner of banners) {
-                const data = await db.getMaterialData(banner.imageId);
-                if (data) {
-                    images[banner.imageId] = data;
-                }
+        const images: {[key: string]: string} = {};
+        for (const banner of banners) {
+            const url = db.getFilePublicUrl(banner.imageStoragePath);
+            if (url) {
+                images[banner.imageStoragePath] = url;
             }
-            setBannerImages(images);
-        };
-        fetchImages();
+        }
+        setBannerImages(images);
     }, [banners]);
 
 
@@ -85,9 +82,13 @@ const NewsBannerManager: React.FC<NewsBannerManagerProps> = ({ banners, onAddBan
         return;
       }
 
-      if (pendingFile) { // Adding new
-          onAddBanner({ title: bannerTitle, description: bannerDescription }, pendingFile.file, pendingFile.dataUrl);
-      } else if (editingBanner) { // Editing existing
+      if (pendingFile) {
+          const { file, dataUrl } = pendingFile;
+          onAddBanner(
+              { title: bannerTitle, description: bannerDescription },
+              { name: file.name, type: file.type, dataUrl: dataUrl }
+          );
+      } else if (editingBanner) {
           onUpdateBanner(editingBanner.id, bannerTitle, bannerDescription);
       }
       
@@ -133,7 +134,7 @@ const NewsBannerManager: React.FC<NewsBannerManagerProps> = ({ banners, onAddBan
                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                           {banners.map(banner => (
                             <div key={banner.id} className="group relative bg-slate-50 dark:bg-slate-700/50 rounded-lg shadow-sm overflow-hidden">
-                                <img src={bannerImages[banner.imageId] || ''} alt={banner.title} className="w-full aspect-video object-contain bg-slate-200 dark:bg-slate-600" />
+                                <img src={bannerImages[banner.imageStoragePath] || ''} alt={banner.title} className="w-full aspect-video object-contain bg-slate-200 dark:bg-slate-600" />
                                 <div className="p-4">
                                     <h4 className="font-bold text-slate-800 dark:text-slate-100 truncate">{banner.title}</h4>
                                     <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 h-10 overflow-hidden text-ellipsis">

@@ -13,7 +13,7 @@ import { DocumentIcon } from './icons/DocumentIcon';
 
 interface AccreditationManagerProps {
   materials: TrainingMaterial[];
-  onAddMaterial: (material: TrainingMaterial) => void;
+  onAddMaterial: (fileData: {name: string, type: string, dataUrl: string, description?: string}) => void;
   onDeleteMaterial: (materialId: string) => void;
   onUpdateMaterialDescription: (materialId: string, description: string) => void;
   onBack: () => void;
@@ -30,7 +30,7 @@ const getIconForMimeType = (type: string): { icon: React.ReactNode, color: strin
 const AccreditationManager: React.FC<AccreditationManagerProps> = ({ materials, onAddMaterial, onDeleteMaterial, onUpdateMaterialDescription, onBack }) => {
     const [isUploading, setIsUploading] = useState(false);
     const [uploadError, setUploadError] = useState<string | null>(null);
-    const [previewMaterial, setPreviewMaterial] = useState<TrainingMaterial | null>(null);
+    const [previewMaterial, setPreviewMaterial] = useState<Pick<TrainingMaterial, 'name'|'type'|'storagePath'> | null>(null);
 
     // For description modal
     const [descriptionModalOpen, setDescriptionModalOpen] = useState(false);
@@ -72,14 +72,12 @@ const AccreditationManager: React.FC<AccreditationManagerProps> = ({ materials, 
     const handleSaveMaterialWithDescription = () => {
       if (pendingFile) { // Adding new
           const { file, dataUrl } = pendingFile;
-          const newMaterial: TrainingMaterial = {
-              id: Date.now().toString(),
+          onAddMaterial({
               name: file.name,
               type: file.type,
-              data: dataUrl,
-              description: materialDescription.trim(),
-          };
-          onAddMaterial(newMaterial);
+              dataUrl: dataUrl,
+              description: materialDescription.trim()
+          });
       } else if (editingMaterial) { // Editing existing
           onUpdateMaterialDescription(editingMaterial.id, materialDescription.trim());
       }

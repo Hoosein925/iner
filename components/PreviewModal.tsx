@@ -7,11 +7,11 @@ import * as db from '../services/db';
 interface PreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
-  material: TrainingMaterial;
+  material: Pick<TrainingMaterial, 'name' | 'type' | 'storagePath'>;
 }
 
 const PreviewModal: React.FC<PreviewModalProps> = ({ isOpen, onClose, material }) => {
-  const [materialData, setMaterialData] = useState<string | null>(null);
+  const [publicUrl, setPublicUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -19,23 +19,15 @@ const PreviewModal: React.FC<PreviewModalProps> = ({ isOpen, onClose, material }
     if (isOpen && material) {
       setIsLoading(true);
       setError(null);
-      setMaterialData(null);
+      setPublicUrl(null);
 
-      db.getMaterialData(material.id)
-        .then(data => {
-          if (data) {
-            setMaterialData(data);
-          } else {
-            setError('فایل یافت نشد. ممکن است حذف شده باشد.');
-          }
-        })
-        .catch(err => {
-          console.error(err);
-          setError('خطا در بارگذاری فایل.');
-        })
-        .finally(() => {
-          setIsLoading(false);
-        });
+      const url = db.getFilePublicUrl(material.storagePath);
+      if (url) {
+        setPublicUrl(url);
+      } else {
+        setError('فایل یافت نشد یا مسیر آن نامعتبر است.');
+      }
+      setIsLoading(false);
     }
   }, [isOpen, material]);
 
@@ -56,18 +48,18 @@ const PreviewModal: React.FC<PreviewModalProps> = ({ isOpen, onClose, material }
     if (error) {
         return <p className="text-center text-red-500">{error}</p>
     }
-    if (!materialData) {
+    if (!publicUrl) {
         return <p className="text-center text-slate-500">محتوایی برای نمایش وجود ندارد.</p>
     }
 
     const { type, name } = material;
     if (type.startsWith('image/')) {
-      return <img src={materialData} alt={name} className="max-w-full max-h-full object-contain" />;
+      return <img src={publicUrl} alt={name} className="max-w-full max-h-full object-contain" />;
     }
     if (type.startsWith('video/')) {
       return (
         <video controls className="w-full h-auto max-h-full" autoPlay>
-          <source src={materialData} type={type} />
+          <source src={publicUrl} type={type} />
           مرورگر شما از تگ ویدئو پشتیبانی نمی‌کند.
         </video>
       );
@@ -76,12 +68,32 @@ const PreviewModal: React.FC<PreviewModalProps> = ({ isOpen, onClose, material }
       return (
         <div className="p-8">
             <audio controls className="w-full" autoPlay>
-            <source src={materialData} type={type} />
+            <source src={publicUrl} type={type} />
             مرورگر شما از تگ صوتی پشتیبانی نمی‌کند.
             </audio>
         </div>
       );
     }
+    if (type === 'application/pdf' || type.includes('officedocument')) {
+        return (
+             <div className="flex flex-col items-center justify-center p-8 text-center h-full w-full">
+                <DocumentIcon className="w-24 h-24 text-slate-400 mb-4" />
+                <p className="font-semibold text-lg text-slate-800 dark:text-slate-100 break-all">{name}</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">پیش‌نمایش برای این نوع فایل در دسترس نیست.</p>
+                 <a
+                    href={publicUrl || '#'}
+                    download={material.name}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-6 py-3 text-base font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700"
+                >
+                    <SaveIcon className="w-5 h-5"/>
+                    دانلود و مشاهده فایل
+                </a>
+            </div>
+        )
+    }
+
     // Fallback for other file types
     return (
       <div className="flex flex-col items-center justify-center p-8 text-center">
@@ -105,9 +117,9 @@ const PreviewModal: React.FC<PreviewModalProps> = ({ isOpen, onClose, material }
           </h3>
           <div className="flex items-center gap-2">
             <a
-                href={materialData || '#'}
+                href={publicUrl || '#'}
                 download={material.name}
-                className={`inline-flex items-center gap-2 px-3 py-1.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-md hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600 ${!materialData || isLoading ? 'opacity-50 pointer-events-none' : ''}`}
+                className={`inline-flex items-center gap-2 px-3 py-1.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-md hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600 ${!publicUrl || isLoading ? 'opacity-50 pointer-events-none' : ''}`}
             >
                 <SaveIcon className="w-4 h-4"/>
                 دانلود فایل

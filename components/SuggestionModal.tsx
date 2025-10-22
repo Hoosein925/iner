@@ -1,5 +1,4 @@
-import React, { useRef, useState } from 'react';
-import { jsPDF } from 'jspdf';
+import React, { useRef } from 'react';
 import { AiIcon } from './icons/AiIcon';
 import { DocumentIcon } from './icons/DocumentIcon';
 
@@ -13,58 +12,8 @@ interface SuggestionModalProps {
 
 const SuggestionModal: React.FC<SuggestionModalProps> = ({ isOpen, onClose, title, content, isLoading }) => {
   const contentRef = useRef<HTMLDivElement>(null);
-  const [isPdfDownloading, setIsPdfDownloading] = useState(false);
 
   if (!isOpen) return null;
-
-  const handleDownloadPdf = async () => {
-    if (!contentRef.current) return;
-    setIsPdfDownloading(true);
-
-    const staffName = title.replace('برنامه پیشنهادی برای ', '');
-    const filename = `برنامه-بهبود-${staffName.replace(/ /g, '_')}.pdf`;
-
-    try {
-        const contentElement = contentRef.current;
-        
-        // Temporarily adjust styles for better PDF rendering
-        const originalStyles = contentElement.style.cssText;
-        contentElement.style.padding = '20px'; // Add padding for margins
-        contentElement.style.direction = 'rtl';
-        
-        const pdf = new jsPDF('p', 'pt', 'a4');
-        
-        // Add Vazirmatn font to jsPDF
-        // This is a complex step requiring font files (e.g., .ttf) to be converted to a format jsPDF understands.
-        // For simplicity, we'll rely on the browser's rendering via html2canvas which is now part of the .html method.
-        // A more advanced implementation would load the font directly.
-        
-        await pdf.html(contentElement, {
-            callback: function (doc) {
-                doc.save(filename);
-            },
-            x: 15,
-            y: 15,
-            width: 565, // A4 width in points (595) minus margins (15*2)
-            windowWidth: contentElement.scrollWidth,
-            html2canvas: {
-                scale: 0.75,
-                useCORS: true,
-                letterRendering: true,
-            },
-            autoPaging: 'text',
-        });
-        
-        // Restore original styles
-        contentElement.style.cssText = originalStyles;
-
-    } catch (error) {
-        console.error("Error generating PDF:", error);
-        alert("خطایی در ساخت فایل PDF رخ داد.");
-    } finally {
-        setIsPdfDownloading(false);
-    }
-  };
 
   const handleDownloadWord = () => {
     if (!contentRef.current) return;
@@ -174,18 +123,10 @@ const SuggestionModal: React.FC<SuggestionModalProps> = ({ isOpen, onClose, titl
            <div className="border-t border-slate-200 dark:border-slate-700 p-4 flex justify-end items-center gap-3 bg-slate-50 dark:bg-slate-800/50">
                 <button 
                     onClick={handleDownloadWord} 
-                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-slate-700 bg-white dark:bg-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-600"
+                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
                 >
                     <DocumentIcon className="w-5 h-5" />
-                    دانلود Word (پیشنهادی)
-                </button>
-                <button 
-                    onClick={handleDownloadPdf}
-                    disabled={isPdfDownloading}
-                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-slate-700 bg-white dark:bg-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-wait"
-                >
-                     <DocumentIcon className="w-5 h-5" />
-                     {isPdfDownloading ? 'در حال ساخت...' : 'دانلود PDF'}
+                    دانلود فایل Word
                 </button>
             </div>
         )}

@@ -12,28 +12,16 @@ const NewsCarousel: React.FC<NewsCarouselProps> = ({ banners }) => {
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        const fetchImages = async () => {
-            setIsLoading(true);
-            const imageMap: { [key: string]: string } = {};
-            for (const banner of banners) {
-                try {
-                    const data = await db.getMaterialData(banner.imageId);
-                    if (data) {
-                        imageMap[banner.imageId] = data;
-                    }
-                } catch (error) {
-                    console.error(`Failed to load image for banner ${banner.id}`, error);
-                }
+        setIsLoading(true);
+        const imageMap: { [key: string]: string } = {};
+        for (const banner of banners) {
+            const url = db.getFilePublicUrl(banner.imageStoragePath);
+            if (url) {
+                imageMap[banner.imageStoragePath] = url;
             }
-            setImages(imageMap);
-            setIsLoading(false);
-        };
-
-        if (banners.length > 0) {
-            fetchImages();
-        } else {
-            setIsLoading(false);
         }
+        setImages(imageMap);
+        setIsLoading(false);
     }, [banners]);
 
     const goToPrevious = useCallback(() => {
@@ -72,7 +60,7 @@ const NewsCarousel: React.FC<NewsCarouselProps> = ({ banners }) => {
     }
 
     const currentBanner = banners[currentIndex];
-    const currentImage = images[currentBanner.imageId];
+    const currentImage = images[currentBanner.imageStoragePath];
 
     return (
         <div className="rounded-2xl overflow-hidden shadow-lg bg-white dark:bg-slate-800">

@@ -13,7 +13,7 @@ import { DocumentIcon } from './icons/DocumentIcon';
 
 interface TrainingManagerProps {
   monthlyTrainings: MonthlyTraining[];
-  onAddMaterial: (month: string, material: TrainingMaterial) => void;
+  onAddMaterial: (month: string, fileData: {name: string, type: string, dataUrl: string, description?: string}) => void;
   onDeleteMaterial: (month: string, materialId: string) => void;
   onUpdateMaterialDescription: (month: string, materialId: string, description: string) => void;
   onBack: () => void;
@@ -35,7 +35,7 @@ const TrainingManager: React.FC<TrainingManagerProps> = ({ monthlyTrainings, onA
     const [selectedMonth, setSelectedMonth] = useState<string>(PERSIAN_MONTHS[0]);
     const [isUploading, setIsUploading] = useState(false);
     const [uploadError, setUploadError] = useState<string | null>(null);
-    const [previewMaterial, setPreviewMaterial] = useState<TrainingMaterial | null>(null);
+    const [previewMaterial, setPreviewMaterial] = useState<Pick<TrainingMaterial, 'name'|'type'|'storagePath'> | null>(null);
 
     // For description modal
     const [descriptionModalOpen, setDescriptionModalOpen] = useState(false);
@@ -82,14 +82,12 @@ const TrainingManager: React.FC<TrainingManagerProps> = ({ monthlyTrainings, onA
     const handleSaveMaterialWithDescription = () => {
       if (pendingFile) { // Adding new
           const { file, dataUrl } = pendingFile;
-          const newMaterial: TrainingMaterial = {
-              id: Date.now().toString(),
+          onAddMaterial(selectedMonth, {
               name: file.name,
               type: file.type,
-              data: dataUrl,
-              description: materialDescription.trim(),
-          };
-          onAddMaterial(selectedMonth, newMaterial);
+              dataUrl: dataUrl,
+              description: materialDescription.trim()
+          });
       } else if (editingMaterial) { // Editing existing
           onUpdateMaterialDescription(selectedMonth, editingMaterial.id, materialDescription.trim());
       }

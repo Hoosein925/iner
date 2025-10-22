@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Department, Patient, TrainingMaterial } from '../types';
 import { TrashIcon } from './icons/TrashIcon';
@@ -15,16 +14,18 @@ import * as db from '../services/db';
 import { PaperClipIcon } from './icons/PaperClipIcon';
 import { EditIcon } from './icons/EditIcon';
 import { BackIcon } from './icons/BackIcon';
+import { RefreshIcon } from './icons/RefreshIcon';
 
 interface PatientEducationManagerProps {
   department: Department;
-  onAddMaterial: (material: TrainingMaterial) => void;
+  onAddMaterial: (fileData: {name: string, type: string, dataUrl: string, description?: string}) => void;
   onDeleteMaterial: (materialId: string) => void;
   onUpdateMaterialDescription: (materialId: string, description: string) => void;
   onAddPatient: (name: string, nationalId: string, password?: string) => void;
   onDeletePatient: (patientId: string) => void;
-  onSendMessage: (patientId: string, content: { text?: string; file?: { id: string; name: string; type: string; } }, sender: 'patient' | 'manager') => void;
+  onSendMessage: (patientId: string, content: { text?: string; fileData?: { name: string; type: string; dataUrl: string; } }, sender: 'patient' | 'manager') => void;
   onBack: () => void;
+  onRefreshChat: () => void;
 }
 
 const getIconForMimeType = (type: string): { icon: React.ReactNode, color: string } => {
@@ -35,14 +36,14 @@ const getIconForMimeType = (type: string): { icon: React.ReactNode, color: strin
     return { icon: <DocumentIcon className="w-8 h-8" />, color: 'text-slate-500' };
 };
 
-const PatientEducationManager: React.FC<PatientEducationManagerProps> = ({ department, onAddMaterial, onDeleteMaterial, onUpdateMaterialDescription, onAddPatient, onDeletePatient, onSendMessage, onBack }) => {
+const PatientEducationManager: React.FC<PatientEducationManagerProps> = ({ department, onAddMaterial, onDeleteMaterial, onUpdateMaterialDescription, onAddPatient, onDeletePatient, onSendMessage, onBack, onRefreshChat }) => {
     const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
     const [replyText, setReplyText] = useState('');
 
     // Modals state
     const [isPatientModalOpen, setIsPatientModalOpen] = useState(false);
     const [isContentModalOpen, setIsContentModalOpen] = useState(false);
-    const [previewMaterial, setPreviewMaterial] = useState<TrainingMaterial | null>(null);
+    const [previewMaterial, setPreviewMaterial] = useState<Pick<TrainingMaterial, 'name'|'type'|'storagePath'> | null>(null);
 
     // Patient Modal form state
     const [newPatientName, setNewPatientName] = useState('');
@@ -94,11 +95,8 @@ const PatientEducationManager: React.FC<PatientEducationManagerProps> = ({ depar
                 reader.readAsDataURL(file);
             });
             
-            const fileId = `chat-file-${Date.now()}`;
-            await db.addMaterial({ id: fileId, data: dataUrl });
-
             onSendMessage(selectedPatient.id, {
-                file: { id: fileId, name: file.name, type: file.type }
+                fileData: { name: file.name, type: file.type, dataUrl: dataUrl }
             }, 'manager');
 
         } catch (error) {
@@ -188,11 +186,20 @@ const PatientEducationManager: React.FC<PatientEducationManagerProps> = ({ depar
                   {selectedPatient ? (
                     <div className="flex flex-col h-full">
                         <div className="flex flex-col flex-grow min-h-0">
-                            <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
-                                <button onClick={() => setSelectedPatient(null)} className="p-2 -ml-2 rounded-full text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 md:hidden">
-                                    <BackIcon className="w-6 h-6"/>
+                            <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                    <button onClick={() => setSelectedPatient(null)} className="p-2 -ml-2 rounded-full text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 md:hidden">
+                                        <BackIcon className="w-6 h-6"/>
+                                    </button>
+                                    <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">چت با {selectedPatient.name}</h3>
+                                </div>
+                                <button 
+                                    onClick={onRefreshChat} 
+                                    className="p-2 rounded-full text-indigo-500 bg-indigo-100 dark:bg-indigo-900/50 hover:bg-indigo-200 dark:hover:bg-indigo-900 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                                    title="بارگذاری مجدد گفتگو"
+                                >
+                                    <RefreshIcon className="w-6 h-6"/>
                                 </button>
-                                <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">چت با {selectedPatient.name}</h3>
                             </div>
                             <div className="flex-grow overflow-y-auto p-4 space-y-4 bg-slate-50 dark:bg-slate-900/50">
                                 {(selectedPatient.chatHistory || []).map(msg => (
@@ -201,7 +208,7 @@ const PatientEducationManager: React.FC<PatientEducationManagerProps> = ({ depar
                                     {msg.text && <p className="whitespace-pre-wrap">{msg.text}</p>}
                                     {msg.file && (
                                         <button 
-                                        onClick={() => setPreviewMaterial({ id: msg.file!.id, name: msg.file!.name, type: msg.file!.type })}
+                                        onClick={() => setPreviewMaterial({ name: msg.file!.name, type: msg.file!.type, storagePath: msg.file!.storagePath })}
                                         className="flex items-center gap-3 text-left"
                                         >
                                         <div className={`flex-shrink-0 ${msg.sender === 'manager' ? 'text-white' : 'text-slate-600 dark:text-slate-300'}`}>
@@ -311,10 +318,10 @@ const PatientEducationManager: React.FC<PatientEducationManagerProps> = ({ depar
 // Sub-component for Content Management inside the modal
 const ContentManager: React.FC<{
     materials: TrainingMaterial[];
-    onAddMaterial: (material: TrainingMaterial) => void;
+    onAddMaterial: (fileData: {name: string, type: string, dataUrl: string, description?: string}) => void;
     onDeleteMaterial: (materialId: string) => void;
     onUpdateMaterialDescription: (materialId: string, description: string) => void;
-    setPreviewMaterial: (material: TrainingMaterial | null) => void;
+    setPreviewMaterial: (material: Pick<TrainingMaterial, 'name'|'type'|'storagePath'> | null) => void;
 }> = ({ materials, onAddMaterial, onDeleteMaterial, onUpdateMaterialDescription, setPreviewMaterial }) => {
     
     const [isUploading, setIsUploading] = useState(false);
@@ -351,14 +358,12 @@ const ContentManager: React.FC<{
     const handleSaveMaterialWithDescription = () => {
         if (pendingFile) {
             const { file, dataUrl } = pendingFile;
-            const newMaterial: TrainingMaterial = {
-                id: Date.now().toString(),
+            onAddMaterial({
                 name: file.name,
                 type: file.type,
-                data: dataUrl,
+                dataUrl: dataUrl,
                 description: materialDescription.trim(),
-            };
-            onAddMaterial(newMaterial);
+            });
         } else if (editingMaterial) {
             onUpdateMaterialDescription(editingMaterial.id, materialDescription.trim());
         }

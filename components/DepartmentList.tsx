@@ -1,7 +1,6 @@
-
-
-import React, { useState } from 'react';
-import { Department, UserRole } from '../types';
+import React, { useState, useRef } from 'react';
+// FIX: Import the 'Department' type.
+import { Hospital, UserRole, Department } from '../types';
 import Modal from './Modal';
 import { PlusIcon } from './icons/PlusIcon';
 import { TrashIcon } from './icons/TrashIcon';
@@ -10,12 +9,13 @@ import { ShieldCheckIcon } from './icons/ShieldCheckIcon';
 import { NewspaperIcon } from './icons/NewspaperIcon';
 import { RefreshIcon } from './icons/RefreshIcon';
 import { ChatIcon } from './icons/ChatIcon';
-import { ClipboardDocumentListIcon } from './icons/ClipboardDocumentListIcon';
+import { LightbulbIcon } from './icons/LightbulbIcon';
 import { CalendarIcon } from './icons/CalendarIcon';
+import { SaveIcon } from './icons/SaveIcon';
+import { UploadIcon } from './icons/UploadIcon';
 
 interface DepartmentListProps {
-  departments: Department[];
-  hospitalName: string;
+  hospital: Hospital;
   onAddDepartment: (name: string, managerName: string, managerNationalId: string, managerPassword: string, staffCount: number, bedCount: number) => void;
   onUpdateDepartment: (id: string, updatedData: Partial<Omit<Department, 'id' | 'staff'>>) => void;
   onDeleteDepartment: (id: string) => void;
@@ -24,15 +24,15 @@ interface DepartmentListProps {
   onManageAccreditation: () => void;
   onManageNewsBanners: () => void;
   onManageNeedsAssessment: () => void;
-  onResetHospital: (supervisorNationalId: string, supervisorPassword: string) => boolean;
+  onResetHospital: (supervisorNationalId: string) => Promise<boolean>;
   onContactAdmin: () => void;
   onArchiveYear: (yearToArchive: number) => void;
+  onReplaceHospitalData: (hospitalData: Hospital) => void;
   userRole: UserRole;
 }
 
 const DepartmentList: React.FC<DepartmentListProps> = ({
-  departments,
-  hospitalName,
+  hospital,
   onAddDepartment,
   onUpdateDepartment,
   onDeleteDepartment,
@@ -44,6 +44,7 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
   onResetHospital,
   onContactAdmin,
   onArchiveYear,
+  onReplaceHospitalData,
   userRole,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -59,7 +60,6 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [resetStep, setResetStep] = useState(1); // 1: confirm, 2: credentials
   const [supervisorIdInput, setSupervisorIdInput] = useState('');
-  const [supervisorPasswordInput, setSupervisorPasswordInput] = useState('');
   const [resetError, setResetError] = useState<string | null>(null);
 
   // State for archive modal
@@ -67,7 +67,6 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
   const [archiveStep, setArchiveStep] = useState(1);
   const [yearConfirmation, setYearConfirmation] = useState('');
   const suggestedYear = new Date().toLocaleDateString('fa-IR-u-nu-latn').split('/')[0];
-
 
   const resetForm = () => {
       setNewDepartmentName('');
@@ -137,7 +136,6 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
     setTimeout(() => {
         setResetStep(1);
         setSupervisorIdInput('');
-        setSupervisorPasswordInput('');
         setResetError(null);
     }, 300); // Delay reset to allow modal to close gracefully
   };
@@ -148,13 +146,13 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
     setIsResetModalOpen(true);
   };
 
-  const handleConfirmReset = () => {
-    const success = onResetHospital(supervisorIdInput, supervisorPasswordInput);
+  const handleConfirmReset = async () => {
+    const success = await onResetHospital(supervisorIdInput.trim());
     if (success) {
       alert('تمام بخش‌های بیمارستان با موفقیت حذف شدند.');
       resetResetModal();
     } else {
-      setResetError('کد ملی یا رمز عبور سوپروایزر نامعتبر است.');
+      setResetError('کد ملی سوپروایزر نامعتبر است یا خطایی رخ داده است.');
     }
   };
 
@@ -188,7 +186,7 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
   return (
     <div className="p-4 sm:p-6 lg:p-8">
       <div className="flex flex-wrap justify-between items-center mb-6 gap-4">
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100">بخش های بیمارستان: <span className="text-slate-600 dark:text-slate-400">{hospitalName}</span></h1>
+        <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100">بخش های بیمارستان: <span className="text-slate-600 dark:text-slate-400">{hospital.name}</span></h1>
         <div className="flex items-center gap-2 flex-wrap justify-end">
             {(userRole === UserRole.Supervisor || userRole === UserRole.Admin) && (
               <>
@@ -203,7 +201,7 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
                     onClick={onManageNeedsAssessment}
                     className={`${baseButtonClass} bg-yellow-500 hover:bg-yellow-600 focus:ring-yellow-400`}
                   >
-                    <ClipboardDocumentListIcon className="w-5 h-5" />
+                    <LightbulbIcon className="w-5 h-5" />
                     نیازسنجی و نظرسنجی
                   </button>
               </>
@@ -232,13 +230,15 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
               مطالب اعتباربخشی
             </button>
             {(userRole === UserRole.Admin || userRole === UserRole.Supervisor) && (
-              <button
-                onClick={handleOpenResetModal}
-                className={`${baseButtonClass} bg-red-600 hover:bg-red-700 focus:ring-red-500`}
-              >
-                <RefreshIcon className="w-5 h-5" />
-                ریست کردن بیمارستان
-              </button>
+              <>
+                <button
+                  onClick={handleOpenResetModal}
+                  className={`${baseButtonClass} bg-red-600 hover:bg-red-700 focus:ring-red-500`}
+                >
+                  <RefreshIcon className="w-5 h-5" />
+                  ریست کردن بیمارستان
+                </button>
+              </>
             )}
             <button
               onClick={handleOpenAddModal}
@@ -250,14 +250,14 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
         </div>
       </div>
 
-      {departments.length === 0 ? (
+      {hospital.departments.length === 0 ? (
         <div className="text-center py-16 bg-white dark:bg-slate-800 rounded-xl shadow">
             <h2 className="text-xl font-medium text-slate-500">هیچ بخشی یافت نشد.</h2>
             <p className="text-slate-400 mt-2">برای شروع، یک بخش جدید اضافه کنید.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-          {departments.map((dep) => (
+          {hospital.departments.map((dep) => (
             <div
               key={dep.id}
               className="relative group bg-white dark:bg-slate-800 rounded-xl shadow-lg hover:shadow-2xl hover:shadow-indigo-500/20 border-t-4 border-indigo-500 transition-all duration-300 hover:-translate-y-1"
@@ -379,20 +379,20 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
         )}
         {resetStep === 2 && (
             <div className="space-y-4">
-                <p className="text-sm text-slate-500 dark:text-slate-400">برای تایید، لطفاً کد ملی و رمز عبور سوپروایزر آموزشی این بیمارستان را وارد کنید.</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                    برای تایید، لطفاً کد ملی سوپروایزر آموزشی این بیمارستان را وارد کنید.
+                    {userRole === UserRole.Admin && (
+                        <span className="block mt-2 font-semibold">
+                            (ادمین کل می‌تواند از کد ملی خود به عنوان کلید اصلی استفاده کند)
+                        </span>
+                    )}
+                </p>
                 <input
                     type="text"
                     inputMode="numeric"
                     value={supervisorIdInput}
                     onChange={(e) => { setSupervisorIdInput(e.target.value.replace(/\D/g, '')); setResetError(null); }}
                     placeholder="کد ملی سوپروایزر"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md dark:bg-slate-700 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-                <input
-                    type="password"
-                    value={supervisorPasswordInput}
-                    onChange={(e) => { setSupervisorPasswordInput(e.target.value); setResetError(null); }}
-                    placeholder="رمز عبور سوپروایزر"
                     className="w-full px-3 py-2 border border-slate-300 rounded-md dark:bg-slate-700 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
                 {resetError && <p className="text-red-500 text-sm text-center">{resetError}</p>}

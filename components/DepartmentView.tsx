@@ -1,10 +1,5 @@
 
-
-
-
-
-
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Department, StaffMember, SkillCategory, UserRole, NewsBanner, MonthlyWorkLog } from '../types';
 import Modal from './Modal';
@@ -16,10 +11,13 @@ import { ClipboardDocumentCheckIcon } from './icons/ClipboardDocumentCheckIcon';
 import { ChecklistIcon } from './icons/ChecklistIcon';
 import NewsCarousel from './NewsCarousel';
 import { BookOpenIcon } from './icons/BookOpenIcon';
+import { SaveIcon } from './icons/SaveIcon';
+import { UploadIcon } from './icons/UploadIcon';
 
 
 interface DepartmentViewProps {
   department: Department;
+  hospitalId: string;
   onBack: () => void;
   onAddStaff: (departmentId: string, name: string, title: string, nationalId: string, password?: string) => void;
   onUpdateStaff: (departmentId: string, staffId: string, updatedData: Partial<Omit<StaffMember, 'id' | 'assessments'>>) => void;
@@ -31,6 +29,7 @@ interface DepartmentViewProps {
   onManageTraining: () => void;
   onManagePatientEducation: () => void;
   onAddOrUpdateWorkLog: (departmentId: string, staffId: string, workLog: MonthlyWorkLog) => void;
+  onReplaceDepartmentData: (hospitalId: string, departmentData: Department) => void;
   userRole: UserRole;
   newsBanners: NewsBanner[];
   activeYear: number;
@@ -47,6 +46,7 @@ const CHART_COLORS = ['#3b82f6', '#16a34a', '#f97316', '#dc2626', '#8b5cf6', '#d
 
 const DepartmentView: React.FC<DepartmentViewProps> = ({
   department,
+  hospitalId,
   onBack,
   onAddStaff,
   onUpdateStaff,
@@ -58,6 +58,7 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
   onManageTraining,
   onManagePatientEducation,
   onAddOrUpdateWorkLog,
+  onReplaceDepartmentData,
   userRole,
   newsBanners,
   activeYear,
@@ -281,7 +282,6 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
     return [...department.staff].sort((a, b) => a.name.localeCompare(b.name, 'fa'));
   }, [department.staff]);
 
-
   const renderStaffListView = () => (
     <>
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-6 mb-8 grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
@@ -308,9 +308,9 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
           <h2 className="text-xl font-bold mb-4">روند میانگین امتیازات مهارت بخش در سال {activeYear}</h2>
           <div className="bg-slate-100 dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-700">
             <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={chartInfo.data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                <LineChart data={chartInfo.data} margin={{ top: 5, right: 20, left: -20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="5 5" stroke="rgba(100, 116, 139, 0.3)" />
-                <XAxis dataKey="name" tick={{ fill: 'currentColor', fontSize: 12 }} className="text-slate-500 dark:text-slate-400" padding={{ left: 20, right: 20 }} />
+                <XAxis dataKey="name" tick={{ fill: 'currentColor', fontSize: 12 }} className="text-slate-500 dark:text-slate-400" padding={{ left: 30 }} />
                 <YAxis unit="%" domain={[0, 100]} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-slate-500 dark:text-slate-400" />
                 <Tooltip
                     cursor={{ stroke: '#94a3b8', strokeWidth: 1, strokeDasharray: '5 5' }}
@@ -342,9 +342,9 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
           <h2 className="text-xl font-bold mb-4">روند پیشرفت فردی پرسنل در سال {activeYear}</h2>
           <div className="bg-slate-100 dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-700">
             <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={staffProgressChartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                <LineChart data={staffProgressChartData} margin={{ top: 5, right: 20, left: -20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="5 5" stroke="rgba(100, 116, 139, 0.3)" />
-                <XAxis dataKey="name" tick={{ fill: 'currentColor', fontSize: 12 }} className="text-slate-500 dark:text-slate-400" padding={{ left: 20, right: 20 }} />
+                <XAxis dataKey="name" tick={{ fill: 'currentColor', fontSize: 12 }} className="text-slate-500 dark:text-slate-400" padding={{ left: 30 }} />
                 <YAxis unit="%" domain={[0, 100]} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-slate-500 dark:text-slate-400" />
                 <Tooltip
                     cursor={{ stroke: '#94a3b8', strokeWidth: 1, strokeDasharray: '5 5' }}
@@ -624,13 +624,13 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
                 </button>
             </div>
         )}
-    </div>
+      </div>
 
-    {newsBanners && newsBanners.length > 0 && (
-        <div className="mb-8 max-w-5xl mx-auto">
-            <NewsCarousel banners={newsBanners} />
-        </div>
-    )}
+      {newsBanners && newsBanners.length > 0 && (
+          <div className="mb-8">
+              <NewsCarousel banners={newsBanners} />
+          </div>
+      )}
 
       {renderStaffListView()}
     </div>

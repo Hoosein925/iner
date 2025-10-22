@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Department, Patient, TrainingMaterial } from '../types';
 import PreviewModal from './PreviewModal';
@@ -10,11 +9,13 @@ import { DocumentIcon } from './icons/DocumentIcon';
 import { PaperClipIcon } from './icons/PaperClipIcon';
 import * as db from '../services/db';
 import { SunIcon } from './icons/SunIcon';
+import { RefreshIcon } from './icons/RefreshIcon';
 
 interface PatientPortalViewProps {
   department: Department;
   patient: Patient;
-  onSendMessage: (content: { text?: string; file?: { id: string; name: string; type: string; } }) => void;
+  onSendMessage: (content: { text?: string; fileData?: { name: string; type: string; dataUrl: string; } }) => void;
+  onRefreshChat: () => void;
 }
 
 const getIconForMimeType = (type: string, size: 'large' | 'small' = 'large'): { icon: React.ReactNode, color: string } => {
@@ -26,8 +27,8 @@ const getIconForMimeType = (type: string, size: 'large' | 'small' = 'large'): { 
     return { icon: <DocumentIcon className={className} />, color: 'text-slate-500' };
 };
 
-const PatientPortalView: React.FC<PatientPortalViewProps> = ({ department, patient, onSendMessage }) => {
-    const [previewMaterial, setPreviewMaterial] = useState<TrainingMaterial | null>(null);
+const PatientPortalView: React.FC<PatientPortalViewProps> = ({ department, patient, onSendMessage, onRefreshChat }) => {
+    const [previewMaterial, setPreviewMaterial] = useState<Pick<TrainingMaterial, 'name'|'type'|'storagePath'> | null>(null);
     const [newMessage, setNewMessage] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -58,11 +59,8 @@ const PatientPortalView: React.FC<PatientPortalViewProps> = ({ department, patie
                 reader.readAsDataURL(file);
             });
             
-            const fileId = `chat-file-${Date.now()}`;
-            await db.addMaterial({ id: fileId, data: dataUrl });
-
             onSendMessage({
-                file: { id: fileId, name: file.name, type: file.type }
+                fileData: { name: file.name, type: file.type, dataUrl: dataUrl }
             });
 
         } catch (error) {
@@ -126,8 +124,15 @@ const PatientPortalView: React.FC<PatientPortalViewProps> = ({ department, patie
 
             {/* Chat Section */}
             <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg flex flex-col h-[70vh] mb-8 overflow-hidden border border-slate-200 dark:border-slate-700">
-                <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
-                    <h3 className="text-2xl font-bold text-center">سوالی راجب بیماری و درمانت داری همین جا بپرس</h3>
+                <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex-shrink-0 flex items-center justify-between">
+                    <h3 className="text-2xl font-bold text-center flex-grow">سوالی راجب بیماری و درمانت داری همین جا بپرس</h3>
+                    <button 
+                        onClick={onRefreshChat} 
+                        className="p-2 rounded-full text-indigo-500 bg-indigo-100 dark:bg-indigo-900/50 hover:bg-indigo-200 dark:hover:bg-indigo-900 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                        title="بارگذاری مجدد گفتگو"
+                    >
+                        <RefreshIcon className="w-6 h-6"/>
+                    </button>
                 </div>
                 <div className="flex-grow overflow-y-auto p-4 space-y-4 bg-slate-50 dark:bg-slate-900/50">
                   {chatHistory.map(msg => (
@@ -136,7 +141,7 @@ const PatientPortalView: React.FC<PatientPortalViewProps> = ({ department, patie
                         {msg.text && <p className="whitespace-pre-wrap">{msg.text}</p>}
                         {msg.file && (
                             <button 
-                                onClick={() => setPreviewMaterial({ id: msg.file!.id, name: msg.file!.name, type: msg.file!.type })}
+                                onClick={() => setPreviewMaterial({ name: msg.file!.name, type: msg.file!.type, storagePath: msg.file!.storagePath })}
                                 className="flex items-center gap-3 text-left p-2 -m-2 rounded-lg hover:bg-black/10"
                             >
                                 <div className={`flex-shrink-0 ${msg.sender === 'patient' ? 'text-white' : 'text-slate-600 dark:text-slate-300'}`}>

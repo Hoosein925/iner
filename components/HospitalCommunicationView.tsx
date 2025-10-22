@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Hospital, TrainingMaterial } from '../types';
 import { BackIcon } from './icons/BackIcon';
@@ -10,6 +9,7 @@ import { VideoIcon } from './icons/VideoIcon';
 import { AudioIcon } from './icons/AudioIcon';
 import { PdfIcon } from './icons/PdfIcon';
 import { DocumentIcon } from './icons/DocumentIcon';
+import { RefreshIcon } from './icons/RefreshIcon';
 
 const getIconForMimeType = (type: string): { icon: React.ReactNode, color: string } => {
     if (type.startsWith('image/')) return { icon: <ImageIcon className="w-8 h-8" />, color: 'text-blue-500' };
@@ -21,13 +21,14 @@ const getIconForMimeType = (type: string): { icon: React.ReactNode, color: strin
 
 interface HospitalCommunicationViewProps {
   hospital: Hospital;
-  onSendMessage: (content: { text?: string; file?: { id: string; name: string; type: string; } }) => void;
+  onSendMessage: (content: { text?: string; fileData?: { name: string; type: string; dataUrl: string; } }) => void;
   onBack: () => void;
+  onRefreshChat: () => void;
 }
 
-const HospitalCommunicationView: React.FC<HospitalCommunicationViewProps> = ({ hospital, onSendMessage, onBack }) => {
+const HospitalCommunicationView: React.FC<HospitalCommunicationViewProps> = ({ hospital, onSendMessage, onBack, onRefreshChat }) => {
   const [newMessage, setNewMessage] = useState('');
-  const [previewMaterial, setPreviewMaterial] = useState<TrainingMaterial | null>(null);
+  const [previewMaterial, setPreviewMaterial] = useState<Pick<TrainingMaterial, 'name'|'type'|'storagePath'> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -58,14 +59,11 @@ const HospitalCommunicationView: React.FC<HospitalCommunicationViewProps> = ({ h
         reader.readAsDataURL(file);
       });
       
-      const fileId = `chat-file-${Date.now()}`;
-      await db.addMaterial({ id: fileId, data: dataUrl });
-
       onSendMessage({
-          file: {
-              id: fileId,
+          fileData: {
               name: file.name,
               type: file.type,
+              dataUrl: dataUrl
           }
       });
     } catch (error) {
@@ -90,6 +88,13 @@ const HospitalCommunicationView: React.FC<HospitalCommunicationViewProps> = ({ h
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md flex flex-col h-[calc(100vh-12rem)]">
         <div className="flex justify-between items-center p-4 border-b border-slate-200 dark:border-slate-700">
           <h2 className="text-xl font-bold">تماس با ادمین کل - {hospital.name}</h2>
+          <button 
+            onClick={onRefreshChat} 
+            className="p-2 rounded-full text-indigo-500 bg-indigo-100 dark:bg-indigo-900/50 hover:bg-indigo-200 dark:hover:bg-indigo-900 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+            title="بارگذاری مجدد گفتگو"
+          >
+              <RefreshIcon className="w-6 h-6"/>
+          </button>
         </div>
 
         <div className="flex-grow overflow-y-auto p-4 space-y-4 bg-slate-50 dark:bg-slate-900/50">
@@ -99,7 +104,7 @@ const HospitalCommunicationView: React.FC<HospitalCommunicationViewProps> = ({ h
                 {msg.text && <p className="whitespace-pre-wrap">{msg.text}</p>}
                 {msg.file && (
                   <button 
-                    onClick={() => setPreviewMaterial({ id: msg.file!.id, name: msg.file!.name, type: msg.file!.type })}
+                    onClick={() => setPreviewMaterial({ name: msg.file!.name, type: msg.file!.type, storagePath: msg.file!.storagePath })}
                     className="flex items-center gap-3 text-left"
                   >
                     <div className={`flex-shrink-0 ${msg.sender === 'hospital' ? 'text-white' : 'text-slate-600 dark:text-slate-300'}`}>
@@ -146,7 +151,7 @@ const HospitalCommunicationView: React.FC<HospitalCommunicationViewProps> = ({ h
           </button>
         </div>
       </div>
-      <PreviewModal isOpen={!!previewMaterial} onClose={() => setPreviewMaterial(null)} material={previewMaterial!}/>
+      {previewMaterial && <PreviewModal isOpen={!!previewMaterial} onClose={() => setPreviewMaterial(null)} material={previewMaterial}/>}
     </>
   );
 };

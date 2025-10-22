@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Hospital, TrainingMaterial } from '../types';
 import { BackIcon } from './icons/BackIcon';
@@ -10,6 +9,7 @@ import { VideoIcon } from './icons/VideoIcon';
 import { AudioIcon } from './icons/AudioIcon';
 import { PdfIcon } from './icons/PdfIcon';
 import { DocumentIcon } from './icons/DocumentIcon';
+import { RefreshIcon } from './icons/RefreshIcon';
 
 const getIconForMimeType = (type: string): { icon: React.ReactNode, color: string } => {
     if (type.startsWith('image/')) return { icon: <ImageIcon className="w-8 h-8" />, color: 'text-blue-500' };
@@ -21,14 +21,15 @@ const getIconForMimeType = (type: string): { icon: React.ReactNode, color: strin
 
 interface AdminCommunicationViewProps {
   hospitals: Hospital[];
-  onSendMessage: (hospitalId: string, content: { text?: string; file?: { id: string; name: string; type: string; } }) => void;
+  onSendMessage: (hospitalId: string, content: { text?: string; fileData?: { name: string; type: string; dataUrl: string; } }) => void;
   onBack: () => void;
+  onRefreshChat: () => void;
 }
 
-const AdminCommunicationView: React.FC<AdminCommunicationViewProps> = ({ hospitals, onSendMessage, onBack }) => {
+const AdminCommunicationView: React.FC<AdminCommunicationViewProps> = ({ hospitals, onSendMessage, onBack, onRefreshChat }) => {
   const [selectedHospitalId, setSelectedHospitalId] = useState<string | null>(hospitals[0]?.id || null);
   const [replyTexts, setReplyTexts] = useState<{ [hospitalId: string]: string }>({});
-  const [previewMaterial, setPreviewMaterial] = useState<TrainingMaterial | null>(null);
+  const [previewMaterial, setPreviewMaterial] = useState<Pick<TrainingMaterial, 'name'|'type'|'storagePath'> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -74,14 +75,11 @@ const AdminCommunicationView: React.FC<AdminCommunicationViewProps> = ({ hospita
         reader.readAsDataURL(file);
       });
       
-      const fileId = `chat-file-${Date.now()}`;
-      await db.addMaterial({ id: fileId, data: dataUrl });
-
       onSendMessage(selectedHospitalId, {
-          file: {
-              id: fileId,
+          fileData: {
               name: file.name,
               type: file.type,
+              dataUrl: dataUrl,
           }
       });
     } catch (error) {
@@ -134,11 +132,20 @@ const AdminCommunicationView: React.FC<AdminCommunicationViewProps> = ({ hospita
         <div className={`w-full md:w-2/3 flex flex-col ${selectedHospitalId ? 'flex' : 'hidden md:flex'}`}>
           {selectedHospital ? (
             <>
-              <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
-                 <button onClick={() => setSelectedHospitalId(null)} className="p-2 -ml-2 rounded-full text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 md:hidden">
-                    <BackIcon className="w-6 h-6"/>
+              <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <button onClick={() => setSelectedHospitalId(null)} className="p-2 -ml-2 rounded-full text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 md:hidden">
+                        <BackIcon className="w-6 h-6"/>
+                    </button>
+                    <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">{selectedHospital.name}</h3>
+                </div>
+                <button 
+                    onClick={onRefreshChat} 
+                    className="p-2 rounded-full text-indigo-500 bg-indigo-100 dark:bg-indigo-900/50 hover:bg-indigo-200 dark:hover:bg-indigo-900 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                    title="بارگذاری مجدد گفتگو"
+                >
+                    <RefreshIcon className="w-6 h-6"/>
                 </button>
-                <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">{selectedHospital.name}</h3>
               </div>
               <div className="flex-grow overflow-y-auto p-4 space-y-4 bg-slate-50 dark:bg-slate-900/50">
                 {(selectedHospital.adminMessages || []).map(msg => (
@@ -147,7 +154,7 @@ const AdminCommunicationView: React.FC<AdminCommunicationViewProps> = ({ hospita
                       {msg.text && <p className="whitespace-pre-wrap">{msg.text}</p>}
                       {msg.file && (
                         <button 
-                          onClick={() => setPreviewMaterial({ id: msg.file!.id, name: msg.file!.name, type: msg.file!.type })}
+                          onClick={() => setPreviewMaterial({ name: msg.file!.name, type: msg.file!.type, storagePath: msg.file!.storagePath })}
                           className="flex items-center gap-3 text-left"
                         >
                           <div className={`flex-shrink-0 ${msg.sender === 'admin' ? 'text-white' : 'text-slate-600 dark:text-slate-300'}`}>
@@ -200,7 +207,7 @@ const AdminCommunicationView: React.FC<AdminCommunicationViewProps> = ({ hospita
           )}
         </div>
       </div>
-      <PreviewModal isOpen={!!previewMaterial} onClose={() => setPreviewMaterial(null)} material={previewMaterial!}/>
+      {previewMaterial && <PreviewModal isOpen={!!previewMaterial} onClose={() => setPreviewMaterial(null)} material={previewMaterial}/>}
     </>
   );
 };
