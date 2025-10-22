@@ -1,6 +1,9 @@
-
-
 import { Hospital, Department, StaffMember, Assessment, LoggedInUser, UserRole, MonthlyWorkLog } from '../types';
+import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
+
+const supabaseUrl = 'https://etpitgyohgpbygyfgeyt.supabase.co'
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV0cGl0Z3lvaGdwYnlneWZnZXl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjExMjEzMTcsImV4cCI6MjA3NjY5NzMxN30.pVNJL7KxU4RQ2zMPqHE0kYkkhp1eNI7pjiwSlmRPEMg'
+const supabase: SupabaseClient = createClient(supabaseUrl, supabaseKey)
 
 const DB_NAME = 'SkillAssessmentDB';
 const DB_VERSION = 1;
@@ -130,11 +133,10 @@ export const clearAllMaterials = (): Promise<void> => {
   });
 }
 
-// --- Added functions to support App.tsx ---
-
 const HOSPITALS_KEY = 'hospitals_data';
+const DATA_ROW_ID = 1; // Assuming a single row in our table to hold all hospital data.
 
-const getHospitals = (): Hospital[] => {
+const getHospitalsFromLocal = (): Hospital[] => {
     try {
         const data = localStorage.getItem(HOSPITALS_KEY);
         return data ? JSON.parse(data) : [];
@@ -144,28 +146,90 @@ const getHospitals = (): Hospital[] => {
     }
 };
 
-export const saveAllHospitals = (hospitals: Hospital[]): Promise<{ error: Error | null }> => {
-    try {
-        localStorage.setItem(HOSPITALS_KEY, JSON.stringify(hospitals));
-        return Promise.resolve({ error: null });
-    } catch (e) {
-        console.error("Failed to save hospitals to localStorage", e);
-        return Promise.resolve({ error: e as Error });
-    }
-};
-
 export const syncAndAssembleData = async (): Promise<Hospital[]> => {
     await initDB(); // Ensure IndexedDB is ready for file operations.
-    return getHospitals();
+    
+    const { data, error } = await supabase
+      .from('hospitals_json')
+      .select('data')
+      .eq('id', DATA_ROW_ID)
+      .single();
+
+    // PGRST116: "The result contains 0 rows". This is not a fatal error, just means no data yet.
+    if (error && error.code !== 'PGRST116') {
+        console.warn(`Could not fetch data from Supabase (Code: ${error.code}), using local fallback. Message: ${error.message}`);
+        return getHospitalsFromLocal();
+    }
+
+    if (data && data.data) {
+        // Update local storage with fresh data from supabase
+        localStorage.setItem(HOSPITALS_KEY, JSON.stringify(data.data));
+        return data.data as Hospital[];
+    }
+    
+    // If no data in supabase (or it's an empty row), return local
+    return getHospitalsFromLocal();
 };
 
+let channel: RealtimeChannel | null = null;
 export const onRemoteChange = (callback: () => void): (() => void) => {
-    // This is a stub for local development. In a real app, this would
-    // subscribe to remote database changes (e.g., via WebSockets).
-    return () => {};
+    if (channel) {
+        supabase.removeChannel(channel);
+    }
+
+    channel = supabase
+        .channel('hospitals_json_changes')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'hospitals_json' }, payload => {
+            console.log('Remote change detected, refreshing data.', payload);
+            callback();
+        })
+        .subscribe();
+    
+    const unsubscribe = () => {
+        if (channel) {
+            supabase.removeChannel(channel);
+            channel = null;
+        }
+    };
+
+    return unsubscribe;
 };
 
-// --- CRUD Operations ---
+// Saves to both Supabase and local storage.
+export const saveAllHospitals = async (hospitals: Hospital[]): Promise<{ error: Error | null }> => {
+    try {
+        // Save to local storage first for immediate offline availability
+        localStorage.setItem(HOSPITALS_KEY, JSON.stringify(hospitals));
+    } catch (e) {
+        console.error("Failed to save hospitals to localStorage", e);
+        // We can still try to save to supabase
+    }
+
+    try {
+        const { error } = await supabase
+            .from('hospitals_json')
+            .upsert({ id: DATA_ROW_ID, data: hospitals }, { onConflict: 'id' });
+
+        if (error) {
+            console.error("Error saving data to Supabase:", error);
+            // Construct a more detailed error message string
+            const errorMessage = `Supabase Error: ${error.message} (Code: ${error.code}). Hint: ${error.hint || 'No hint'}. Details: ${error.details || 'No details'}.`;
+            return { error: new Error(errorMessage) };
+        }
+    } catch (e) {
+        console.error("A network or unexpected error occurred while saving to Supabase:", e);
+        const errorMessage = e instanceof Error ? e.message : "An unknown network error occurred.";
+        return { error: new Error(errorMessage) };
+    }
+    
+    return { error: null };
+};
+
+
+const getHospitals = (): Hospital[] => {
+    return getHospitalsFromLocal();
+};
+
 
 export const upsertHospital = async (hospital: Hospital): Promise<{ error: Error | null }> => {
     const hospitals = getHospitals();
