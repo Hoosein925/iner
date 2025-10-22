@@ -986,7 +986,7 @@ const App: React.FC = () => {
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300 flex flex-col">
         {appScreen !== AppScreen.Welcome && loggedInUser?.role !== UserRole.Patient && (
             <header className="sticky top-0 z-40 bg-gradient-to-r from-purple-600 to-indigo-700 shadow-lg text-white">
                 <div className="container mx-auto px-4 sm:px-6 lg:px-8 h-16 flex justify-between items-center">
@@ -1032,7 +1032,7 @@ const App: React.FC = () => {
                 </div>
             </header>
         )}
-        <main className={`container mx-auto ${appScreen !== AppScreen.Welcome ? 'pb-16' : ''}`}>
+        <main className={`container mx-auto flex-grow ${appScreen !== AppScreen.Welcome ? 'py-8' : ''}`}>
           <Suspense fallback={<LoadingSpinner />}>
             {renderContent()}
           </Suspense>
