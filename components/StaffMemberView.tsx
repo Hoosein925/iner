@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Department, StaffMember, SkillCategory, Assessment, NamedChecklistTemplate, ExamTemplate, Question, QuestionType, ExamSubmission, ExamAnswer, UserRole, MonthlyTraining, TrainingMaterial, NewsBanner, MonthlyNeedsAssessment } from '../types';
@@ -155,7 +154,7 @@ const StaffMemberView: React.FC<StaffMemberViewProps> = ({
 
   const assessmentsByMonth = useMemo(() => {
     const map = new Map<string, Assessment>();
-    staffMember.assessments
+    (staffMember.assessments || [])
       .filter(a => a.year === activeYear)
       .forEach(a => map.set(a.month, a));
     return map;
@@ -236,18 +235,19 @@ const StaffMemberView: React.FC<StaffMemberViewProps> = ({
 
   const progressChartInfo = useMemo(() => {
     const allCategoryNames = new Set<string>();
-    staffMember.assessments.forEach(ass => ass.skillCategories.forEach(cat => allCategoryNames.add(cat.name)));
+    (staffMember.assessments || []).forEach(ass => (ass.skillCategories || []).forEach(cat => allCategoryNames.add(cat.name)));
     const categoryNames = Array.from(allCategoryNames);
 
-    const data = staffMember.assessments
+    const data = (staffMember.assessments || [])
       .filter(assessment => assessment.year === activeYear && PERSIAN_MONTHS.includes(assessment.month))
       .map(assessment => {
       const scores: { [key: string]: any } = { name: assessment.month };
       const maxPossibleScore = assessment.maxScore ?? 4;
       
-      assessment.skillCategories.forEach(cat => {
-          const totalScore = cat.items.reduce((sum, item) => sum + item.score, 0);
-          const maxScore = cat.items.length * maxPossibleScore;
+      (assessment.skillCategories || []).forEach(cat => {
+          const items = cat.items || [];
+          const totalScore = items.reduce((sum, item) => sum + (item?.score || 0), 0);
+          const maxScore = items.length * maxPossibleScore;
           scores[cat.name] = maxScore > 0 ? parseFloat(((totalScore / maxScore) * 100).toFixed(1)) : null;
       });
       categoryNames.forEach(name => { if (!(name in scores)) { scores[name] = null; } });
