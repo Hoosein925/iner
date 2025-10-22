@@ -793,7 +793,17 @@ const App: React.FC = () => {
 
   // --- Data Handlers for Backups ---
   const handleSaveData = () => {
-      if (currentView === View.DepartmentList) {
+      // Admin on Hospital List screen -> Full backup of all hospitals
+      if (loggedInUser?.role === UserRole.Admin && appScreen === AppScreen.HospitalList) {
+        const dataToSave = { type: 'full_backup_metadata_only', hospitals };
+        const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(dataToSave, null, 2))}`;
+        const link = document.createElement('a');
+        link.href = jsonString;
+        link.download = `skill_assessment_backup_${new Date().toISOString().split('T')[0]}.json`;
+        link.click();
+      } 
+      // Supervisor/Admin on Department List screen -> Backup of the selected hospital
+      else if (currentView === View.DepartmentList) {
         const hospital = findHospital(selectedHospitalId);
         if (!hospital) return;
         const dataToSave = { type: 'hospital_backup', hospitalId: hospital.id, data: hospital };
@@ -802,7 +812,9 @@ const App: React.FC = () => {
         link.href = jsonString;
         link.download = `پشتیبان_بیمارستان_${hospital.name.replace(/\s/g, '_')}.json`;
         link.click();
-      } else if (currentView === View.DepartmentView) {
+      } 
+      // Supervisor/Admin/Manager on Department View screen -> Backup of the selected department
+      else if (currentView === View.DepartmentView) {
         const department = findDepartment(findHospital(selectedHospitalId), selectedDepartmentId);
         if (!department) return;
         const dataToSave = { type: 'department_backup', hospitalId: selectedHospitalId, departmentId: department.id, data: department };
@@ -810,13 +822,6 @@ const App: React.FC = () => {
         const link = document.createElement('a');
         link.href = jsonString;
         link.download = `پشتیبان_بخش_${department.name.replace(/\s/g, '_')}.json`;
-        link.click();
-      } else { // Admin Full Backup
-        const dataToSave = { type: 'full_backup_metadata_only', hospitals };
-        const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(dataToSave, null, 2))}`;
-        const link = document.createElement('a');
-        link.href = jsonString;
-        link.download = `skill_assessment_backup_${new Date().toISOString().split('T')[0]}.json`;
         link.click();
       }
   };
