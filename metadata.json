@@ -1,0 +1,5 @@
+{
+  "name": "iner",
+  "description": "An application to manage and evaluate the skills of hospital staff. It allows uploading skill checklists from Excel, dynamically assesses performance based on the categories defined in the file, and provides AI-driven suggestions for improvement.",
+  "requestFramePermissions": []
+}

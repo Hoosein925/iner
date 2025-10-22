@@ -1,11 +1,52 @@
-<div align="center">
+# Hospital Staff Skill Assessment
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+This is a web application for managing and evaluating the skills of hospital staff.
 
-  <h1>Built with AI Studio</h2>
+## Running the Application
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+This project is built with Vite and React, and can be served using a simple Node.js server.
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+### Prerequisites
 
-</div>
+- [Node.js](https://nodejs.org/) (version 18 or higher recommended)
+- [npm](https://www.npmjs.com/) (usually comes with Node.js)
+
+### 1. Installation
+
+First, install the project dependencies:
+
+```bash
+npm install
+```
+
+### 2. Development Mode
+
+To run the application in development mode with hot-reloading:
+
+```bash
+npm run dev
+```
+
+This will start the Vite development server, typically at `http://localhost:5173`.
+
+### 3. Production Mode (with Node.js server)
+
+To run the application in production mode:
+
+**Step A: Build the application**
+
+This command bundles the React app into static files in the `dist/` directory.
+
+```bash
+npm run build
+```
+
+**Step B: Start the Node.js server**
+
+This command starts a simple Express server that serves the built files.
+
+```bash
+npm start
+```
+
+The application will be available at `http://localhost:3000`.
