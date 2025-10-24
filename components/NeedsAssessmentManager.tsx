@@ -56,25 +56,28 @@ const NeedsAssessmentManager: React.FC<NeedsAssessmentManagerProps> = ({ hospita
             return;
         }
 
-        let content = `<div dir="rtl"><h1>نتایج نیازسنجی و نظرسنجی برای ماه ${selectedMonth} سال ${activeYear}</h1>`;
+        let contentHtml = `<h1>نتایج نیازسنجی و نظرسنجی برای ماه ${selectedMonth} سال ${activeYear}</h1>`;
         
         topicsForSelectedMonth.forEach(topic => {
             if (topic.responses.length > 0) {
-                 content += `<br /><hr size="1" /><br />`;
-                content += `<h2>موضوع: ${topic.title}</h2>`;
+                 contentHtml += `<br /><hr size="1" /><br />`;
+                contentHtml += `<h2>موضوع: ${topic.title}</h2>`;
                 if (topic.description) {
-                    content += `<p style="color: #555;"><i>توضیحات: ${topic.description}</i></p>`;
+                    contentHtml += `<p style="color: #555; font-style: italic;">توضیحات: ${topic.description}</p>`;
                 }
-                content += '<h3>پاسخ‌ها:</h3>';
-                content += '<ul style="list-style-type: disc; margin-right: 20px;">';
+                contentHtml += '<h3>پاسخ‌ها:</h3>';
+                contentHtml += '<ul style="list-style-type: disc; margin-right: 20px;">';
                 topic.responses.forEach(res => {
-                    content += `<li style="margin-bottom: 10px;"><b>${res.staffName}:</b><p style="margin: 5px 0 0 0; padding-right: 15px;">${res.response.replace(/\n/g, '<br>')}</p></li>`;
+                    contentHtml += `<li style="margin-bottom: 15px;">
+                        <b>${res.staffName}:</b>
+                        <blockquote style="margin: 5px 0 0 0; padding-right: 15px; border-right: 2px solid #ccc; font-style: italic; color: #555;">
+                            ${res.response.replace(/\n/g, '<br>')}
+                        </blockquote>
+                    </li>`;
                 });
-                content += '</ul>';
+                contentHtml += '</ul>';
             }
         });
-        
-        content += '</div>'
 
         const sourceHTML = `
           <html xmlns:o='urn:schemas-microsoft-com:office:office' 
@@ -95,14 +98,25 @@ const NeedsAssessmentManager: React.FC<NeedsAssessmentManagerProps> = ({ hospita
             <![endif]-->
             <style>
               body { font-family: 'Vazirmatn', 'Times New Roman', serif; direction: rtl; }
-              h1 { font-size: 22pt; }
-              h2 { font-size: 18pt; color: #333; }
+              @page WordSection1 {
+                size: 8.5in 11.0in;
+                margin: 1.0in 1.0in 1.0in 1.0in;
+              }
+              div.WordSection1 {
+                page: WordSection1;
+              }
+              h1 { font-size: 20pt; font-weight: bold; }
+              h2 { font-size: 16pt; font-weight: bold; color: #333; margin-top: 20px; }
               h3 { font-size: 14pt; color: #444; }
               p, li { font-size: 12pt; }
+              blockquote { border-right: 2px solid #ccc; padding-right: 10px; margin-right: 0; font-style: italic; color: #555; }
+              hr { border-top: 1px solid #ccc; }
             </style>
           </head>
           <body>
-            ${content}
+            <div class="WordSection1" dir="rtl">
+                ${contentHtml}
+            </div>
           </body>
           </html>`;
         
@@ -110,7 +124,7 @@ const NeedsAssessmentManager: React.FC<NeedsAssessmentManagerProps> = ({ hospita
         const fileDownload = document.createElement("a");
         document.body.appendChild(fileDownload);
         fileDownload.href = source;
-        fileDownload.download = `نتایج_نظرسنجی_${hospital.name}_${selectedMonth}_${activeYear}.doc`;
+        fileDownload.download = `نتایج_نظرسنجی_${hospital.name.replace(/\s+/g, '_')}_${selectedMonth}_${activeYear}.doc`;
         fileDownload.click();
         document.body.removeChild(fileDownload);
     };
