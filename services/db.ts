@@ -1,5 +1,7 @@
 import { Hospital, LoggedInUser, UserRole, Department, StaffMember, Assessment, TrainingMaterial, NewsBanner, Patient, ChatMessage, AdminMessage, NeedsAssessmentTopic } from '../types';
-import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
+// FIX: The RealtimeChannel type is not exported from supabase-js anymore.
+// The type will be inferred from the supabase client instance.
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 const supabaseUrl = 'https://etpitgyohgpbygyfgeyt.supabase.co'
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV0cGl0Z3lvaGdwYnlneWZnZXl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjExMjEzMTcsImV4cCI6MjA3NjY5NzMxN30.pVNJL7KxU4RQ2zMPqHE0kYkkhp1eNI7pjiwSlmRPEMg'
@@ -111,7 +113,7 @@ export const syncAndAssembleData = async (): Promise<Hospital[]> => {
     return getHospitalsFromLocal();
 };
 
-let channel: RealtimeChannel | null = null;
+let channel: ReturnType<typeof supabase.channel> | null = null;
 export const onRemoteChange = (callback: () => void): (() => void) => {
     if (channel) {
         supabase.removeChannel(channel);
@@ -204,8 +206,8 @@ export const deleteHospital = async (hospitalId: string): Promise<{ error: Error
             const pathsToDelete: string[] = [];
             hospitalToDelete.accreditationMaterials?.forEach(m => m.storagePath && pathsToDelete.push(m.storagePath));
             hospitalToDelete.newsBanners?.forEach(b => b.imageStoragePath && pathsToDelete.push(b.imageStoragePath));
-            hospitalToDelete.trainingMaterials?.forEach(tm => tm.materials.forEach(m => m.storagePath && pathsToDelete.push(m.storagePath)));
             hospitalToDelete.departments.forEach(d => {
+                d.trainingMaterials?.forEach(tm => tm.materials.forEach(m => m.storagePath && pathsToDelete.push(m.storagePath)));
                 d.patientEducationMaterials?.forEach(m => m.storagePath && pathsToDelete.push(m.storagePath));
                 d.patients?.forEach(p => p.chatHistory?.forEach(c => c.file?.storagePath && pathsToDelete.push(c.file.storagePath)));
             });
@@ -230,6 +232,7 @@ export const resetHospitalDepartments = async (hospitalId: string): Promise<{ er
 
         const pathsToDelete: string[] = [];
         hospitalToUpdate.departments.forEach(d => {
+            d.trainingMaterials?.forEach(tm => tm.materials.forEach(m => m.storagePath && pathsToDelete.push(m.storagePath)));
             d.patientEducationMaterials?.forEach(m => m.storagePath && pathsToDelete.push(m.storagePath));
             d.patients?.forEach(p => p.chatHistory?.forEach(c => c.file?.storagePath && pathsToDelete.push(c.file.storagePath)));
         });
@@ -283,6 +286,7 @@ export const deleteDepartment = async (departmentId: string): Promise<{ error: E
     if (!saveResult.error && departmentToDelete) {
         (async () => {
             const pathsToDelete: string[] = [];
+            departmentToDelete.trainingMaterials?.forEach(tm => tm.materials.forEach(m => m.storagePath && pathsToDelete.push(m.storagePath)));
             departmentToDelete.patientEducationMaterials?.forEach(m => m.storagePath && pathsToDelete.push(m.storagePath));
             departmentToDelete.patients?.forEach(p => p.chatHistory?.forEach(c => c.file?.storagePath && pathsToDelete.push(c.file.storagePath)));
             if (pathsToDelete.length > 0) {
@@ -342,14 +346,15 @@ const performAtomicUpdate = async (updateLogic: (hospitals: Hospital[]) => void)
     }
 };
 
-export const addTrainingMaterial = (hospitalId: string, month: string, material: TrainingMaterial) => performAtomicUpdate(hospitals => {
-    const hospital = hospitals.find(h => h.id === hospitalId);
-    if (!hospital) throw new Error("Hospital not found");
-    if (!hospital.trainingMaterials) hospital.trainingMaterials = [];
-    let monthly = hospital.trainingMaterials.find(t => t.month === month);
+export const addTrainingMaterial = (hospitalId: string, departmentId: string, month: string, material: TrainingMaterial) => performAtomicUpdate(hospitals => {
+    const department = hospitals.find(h => h.id === hospitalId)?.departments.find(d => d.id === departmentId);
+    if (!department) throw new Error("Department not found");
+
+    if (!department.trainingMaterials) department.trainingMaterials = [];
+    let monthly = department.trainingMaterials.find(t => t.month === month);
     if (!monthly) {
         monthly = { month, materials: [] };
-        hospital.trainingMaterials.push(monthly);
+        department.trainingMaterials.push(monthly);
     }
     monthly.materials.push(material);
 });
