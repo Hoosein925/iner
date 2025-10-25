@@ -12,10 +12,11 @@ import { PdfIcon } from './icons/PdfIcon';
 import { DocumentIcon } from './icons/DocumentIcon';
 
 interface TrainingManagerProps {
+  departmentId: string;
   monthlyTrainings: MonthlyTraining[];
-  onAddMaterial: (month: string, fileData: {name: string, type: string, dataUrl: string, description?: string}) => void;
-  onDeleteMaterial: (month: string, materialId: string) => void;
-  onUpdateMaterialDescription: (month: string, materialId: string, description: string) => void;
+  onAddMaterial: (departmentId: string, month: string, fileData: {name: string, type: string, dataUrl: string, description?: string}) => void;
+  onDeleteMaterial: (departmentId: string, month: string, materialId: string) => void;
+  onUpdateMaterialDescription: (departmentId: string, month: string, materialId: string, description: string) => void;
   onBack: () => void;
 }
 
@@ -31,7 +32,7 @@ const getIconForMimeType = (type: string): { icon: React.ReactNode, color: strin
     return { icon: <DocumentIcon className="w-10 h-10" />, color: 'text-slate-500' };
 };
 
-const TrainingManager: React.FC<TrainingManagerProps> = ({ monthlyTrainings, onAddMaterial, onDeleteMaterial, onUpdateMaterialDescription, onBack }) => {
+const TrainingManager: React.FC<TrainingManagerProps> = ({ departmentId, monthlyTrainings, onAddMaterial, onDeleteMaterial, onUpdateMaterialDescription, onBack }) => {
     const [selectedMonth, setSelectedMonth] = useState<string>(PERSIAN_MONTHS[0]);
     const [isUploading, setIsUploading] = useState(false);
     const [uploadError, setUploadError] = useState<string | null>(null);
@@ -75,21 +76,21 @@ const TrainingManager: React.FC<TrainingManagerProps> = ({ monthlyTrainings, onA
     
     const handleDeleteClick = (month: string, materialId: string, materialName: string) => {
         if (window.confirm(`آیا از حذف فایل "${materialName}" مطمئن هستید؟`)) {
-            onDeleteMaterial(month, materialId);
+            onDeleteMaterial(departmentId, month, materialId);
         }
     };
     
     const handleSaveMaterialWithDescription = () => {
       if (pendingFile) { // Adding new
           const { file, dataUrl } = pendingFile;
-          onAddMaterial(selectedMonth, {
+          onAddMaterial(departmentId, selectedMonth, {
               name: file.name,
               type: file.type,
               dataUrl: dataUrl,
               description: materialDescription.trim()
           });
       } else if (editingMaterial) { // Editing existing
-          onUpdateMaterialDescription(selectedMonth, editingMaterial.id, materialDescription.trim());
+          onUpdateMaterialDescription(departmentId, selectedMonth, editingMaterial.id, materialDescription.trim());
       }
       
       // Reset state
