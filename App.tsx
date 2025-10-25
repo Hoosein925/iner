@@ -388,7 +388,7 @@ const App: React.FC = () => {
     }
   };
   
-    const handleAddTrainingMaterial = async (month: string, fileData: FileUploadData) => {
+    const handleAddTrainingMaterial = async (departmentId: string, month: string, fileData: FileUploadData) => {
         if (!selectedHospitalId) return;
         const { path, error: uploadError } = await db.uploadFileFromDataUrl(fileData.dataUrl, fileData.name);
         if (uploadError) {
@@ -401,7 +401,7 @@ const App: React.FC = () => {
             storagePath: path, description: fileData.description
         };
 
-        const { error: saveError } = await db.addTrainingMaterial(selectedHospitalId, month, newMaterial);
+        const { error: saveError } = await db.addTrainingMaterial(selectedHospitalId, departmentId, month, newMaterial);
         if (saveError) {
             await db.deleteFile(path); // Cleanup on error
             alert(`خطا در ذخیره اطلاعات فایل: ${saveError.message}`);
@@ -410,30 +410,30 @@ const App: React.FC = () => {
         }
     };
 
-    const handleDeleteTrainingMaterial = async (month: string, materialId: string) => {
+    const handleDeleteTrainingMaterial = async (departmentId: string, month: string, materialId: string) => {
         if (!selectedHospitalId) return;
-        // This is a complex operation that needs to be atomic. We will create a dedicated function in db.ts
-        // For now, let's assume a simpler model. The db function should handle atomicity.
         const hospital = findHospital(selectedHospitalId);
-        if (hospital?.trainingMaterials) {
-            const monthlyTraining = hospital.trainingMaterials.find(t => t.month === month);
+        const department = findDepartment(hospital, departmentId);
+        if (department?.trainingMaterials) {
+            const monthlyTraining = department.trainingMaterials.find(t => t.month === month);
             if (monthlyTraining) {
                 const materialToDelete = monthlyTraining.materials.find(m => m.id === materialId);
                 if (materialToDelete) await db.deleteFile(materialToDelete.storagePath);
                 monthlyTraining.materials = monthlyTraining.materials.filter(m => m.id !== materialId);
             }
-            const { error } = await db.upsertHospital(hospital);
+            const { error } = await db.upsertDepartment(department, selectedHospitalId);
             if (error) alert(`Error: ${error.message}`); else refreshData();
         }
     };
 
-    const handleUpdateTrainingMaterialDescription = async (month: string, materialId: string, description: string) => {
+    const handleUpdateTrainingMaterialDescription = async (departmentId: string, month: string, materialId: string, description: string) => {
         if (!selectedHospitalId) return;
         const hospital = findHospital(selectedHospitalId);
-        if (hospital?.trainingMaterials) {
-            const material = hospital.trainingMaterials.flatMap(t => t.materials).find(m => m.id === materialId);
+        const department = findDepartment(hospital, departmentId);
+        if (department?.trainingMaterials) {
+            const material = department.trainingMaterials.flatMap(t => t.materials).find(m => m.id === materialId);
             if (material) material.description = description;
-            const { error } = await db.upsertHospital(hospital);
+            const { error } = await db.upsertDepartment(department, selectedHospitalId);
             if (error) alert(`Error: ${error.message}`); else refreshData();
         }
     };
@@ -900,7 +900,7 @@ const App: React.FC = () => {
           onAddOrUpdateAssessment={handleAddOrUpdateAssessment} onUpdateAssessmentMessages={handleUpdateAssessmentMessages}
           onSubmitExam={handleSubmitExam} onSubmitNeedsAssessmentResponse={handleSubmitNeedsAssessmentResponse}
           checklistTemplates={selectedHospital.checklistTemplates || []} examTemplates={selectedHospital.examTemplates || []}
-          trainingMaterials={selectedHospital.trainingMaterials || []} accreditationMaterials={selectedHospital.accreditationMaterials || []}
+          trainingMaterials={selectedDepartment.trainingMaterials || []} accreditationMaterials={selectedHospital.accreditationMaterials || []}
           newsBanners={selectedHospital.newsBanners || []} needsAssessments={selectedHospital.needsAssessments || []}
           userRole={loggedInUser.role} activeYear={activeYear} availableYears={allAvailableYears} onYearChange={setActiveYear}
         />;
@@ -909,7 +909,15 @@ const App: React.FC = () => {
       case View.ExamManager:
         return <ExamManager templates={selectedHospital.examTemplates || []} onAddOrUpdate={handleAddOrUpdateExamTemplate} onDelete={handleDeleteExamTemplate} onBack={handleBack} />;
       case View.TrainingManager:
-        return <TrainingManager monthlyTrainings={selectedHospital.trainingMaterials || []} onAddMaterial={handleAddTrainingMaterial} onDeleteMaterial={handleDeleteTrainingMaterial} onUpdateMaterialDescription={handleUpdateTrainingMaterialDescription} onBack={handleBack} />;
+        if (!selectedDepartment) return <div>Department not found.</div>;
+        return <TrainingManager 
+            departmentId={selectedDepartment.id}
+            monthlyTrainings={selectedDepartment.trainingMaterials || []} 
+            onAddMaterial={handleAddTrainingMaterial} 
+            onDeleteMaterial={handleDeleteTrainingMaterial} 
+            onUpdateMaterialDescription={handleUpdateTrainingMaterialDescription} 
+            onBack={handleBack} 
+        />;
       case View.AccreditationManager:
         return <AccreditationManager materials={selectedHospital.accreditationMaterials || []} onAddMaterial={handleAddAccreditationMaterial} onDeleteMaterial={handleDeleteAccreditationMaterial} onUpdateMaterialDescription={handleUpdateAccreditationMaterialDescription} onBack={handleBack} />;
       case View.NewsBannerManager:

@@ -1,4 +1,5 @@
 
+
 export interface SkillItem {
   description: string;
   score: number;
@@ -128,6 +129,7 @@ export interface Department {
   bedCount: number;
   staff: StaffMember[];
   patientEducationMaterials?: TrainingMaterial[];
+  trainingMaterials?: MonthlyTraining[]; // Moved from Hospital to here
   patients?: Patient[];
 }
 
@@ -196,7 +198,6 @@ export interface Hospital {
   departments: Department[];
   checklistTemplates?: NamedChecklistTemplate[];
   examTemplates?: ExamTemplate[];
-  trainingMaterials?: MonthlyTraining[];
   accreditationMaterials?: TrainingMaterial[];
   newsBanners?: NewsBanner[];
   adminMessages?: AdminMessage[];
