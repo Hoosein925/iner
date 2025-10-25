@@ -957,10 +957,12 @@ const App: React.FC = () => {
       );
   }
 
+  const showHeader = loggedInUser?.role !== UserRole.Patient;
+
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300 flex flex-col">
-        {loggedInUser?.role !== UserRole.Patient && (
-            <header className="sticky top-0 z-40 bg-gradient-to-r from-purple-600 to-indigo-700 shadow-lg text-white">
+    <div className={`min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300 flex flex-col ${showHeader ? 'pt-16' : ''}`}>
+        {showHeader && (
+            <header className="fixed top-0 left-0 right-0 z-40 bg-gradient-to-r from-purple-600 to-indigo-700 shadow-lg text-white">
                 <div className="container mx-auto px-4 sm:px-6 lg:px-8 h-16 flex justify-between items-center">
                     <div className="flex items-center gap-4">
                       {(loggedInUser && (appScreen === AppScreen.MainApp || appScreen === AppScreen.HospitalList)) && (
@@ -1004,14 +1006,11 @@ const App: React.FC = () => {
                 </div>
             </header>
         )}
-        {/* FIX: The conditional class was redundant. Due to the check for AppScreen.Welcome earlier in the component, this part of the code is only reachable when it's not the welcome screen, so 'py-8' can be applied directly. */}
-        {/* FIX: Removed redundant conditional check for `appScreen`. The `py-8` class is always applied on this code path. */}
         <main className="container mx-auto flex-grow py-8">
           <Suspense fallback={<LoadingSpinner />}>
             {renderMainContent()}
           </Suspense>
         </main>
-        {/* FIX: This conditional render was redundant. The Footer should always be shown if not on the Welcome screen, which is guaranteed by the early return for AppScreen.Welcome. */}
         <Footer />
         <AboutModal isOpen={isAboutModalOpen} onClose={() => setIsAboutModalOpen(false)} />
         <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} onLogin={handleLogin} loginError={loginError} />
