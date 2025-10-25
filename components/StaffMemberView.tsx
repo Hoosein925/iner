@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Department, StaffMember, SkillCategory, Assessment, NamedChecklistTemplate, ExamTemplate, Question, QuestionType, ExamSubmission, ExamAnswer, UserRole, MonthlyTraining, TrainingMaterial, NewsBanner, MonthlyNeedsAssessment } from '../types';
@@ -142,6 +143,7 @@ const StaffMemberView: React.FC<StaffMemberViewProps> = ({
   const [supervisorMessage, setSupervisorMessage] = useState('');
   const [managerMessage, setManagerMessage] = useState('');
   const [isChecklistModalOpen, setIsChecklistModalOpen] = useState(false);
+  const [isConfirmationModalOpen, setIsConfirmationModalOpen] = useState(false);
   const [assessmentFormData, setAssessmentFormData] = useState<SkillCategory[]>([]);
   const [activeAssessmentTemplate, setActiveAssessmentTemplate] = useState<Partial<NamedChecklistTemplate> | null>(null);
   const [currentExam, setCurrentExam] = useState<ExamTemplate | null>(null);
@@ -158,6 +160,10 @@ const StaffMemberView: React.FC<StaffMemberViewProps> = ({
       .filter(a => a.year === activeYear)
       .forEach(a => map.set(a.month, a));
     return map;
+  }, [staffMember.assessments, activeYear]);
+
+  const hasAnyAssessmentThisYear = useMemo(() => {
+    return (staffMember.assessments || []).some(a => a.year === activeYear && a.skillCategories.some(c => c.items.length > 0));
   }, [staffMember.assessments, activeYear]);
 
   const needsAssessmentTopicsForMonth = useMemo(() => {
@@ -266,18 +272,26 @@ const StaffMemberView: React.FC<StaffMemberViewProps> = ({
   const handleMonthSelect = (month: string) => {
     setSelectedMonth(month);
     const assessment = assessmentsByMonth.get(month);
-    setCurrentScreen('assessment_menu');
-    setSupervisorMessage(assessment?.supervisorMessage || '');
-    setManagerMessage(assessment?.managerMessage || '');
 
-    if (userRole !== UserRole.Staff && !assessment) {
-        if (!checklistTemplates || checklistTemplates.length === 0) {
-            alert("هیچ قالب چک لیستی برای این بیمارستان تعریف نشده است. لطفا ابتدا از صفحه بخش‌ها، یک قالب چک لیست بسازید.");
-            setSelectedMonth(null);
-            setCurrentScreen('month_selection');
-            return;
+    if (assessment) {
+        // If assessment exists, go to menu for all roles
+        setCurrentScreen('assessment_menu');
+        setSupervisorMessage(assessment?.supervisorMessage || '');
+        setManagerMessage(assessment?.managerMessage || '');
+    } else {
+        // No assessment exists for this month
+        setSupervisorMessage('');
+        setManagerMessage('');
+        
+        if (userRole === UserRole.Staff) {
+            // For staff, go directly to menu
+            setCurrentScreen('assessment_menu');
+        } else {
+            // For managers/supervisors, show confirmation modal
+            // Pre-set screen to menu, so closing modal without action lands on the menu
+            setCurrentScreen('assessment_menu');
+            setIsConfirmationModalOpen(true);
         }
-        setIsChecklistModalOpen(true);
     }
   };
 
@@ -436,7 +450,11 @@ const StaffMemberView: React.FC<StaffMemberViewProps> = ({
                   : 'bg-white text-slate-700 dark:bg-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 focus:ring-indigo-500'}`}
             >
               {month}
-              {hasAssessment && <span className="block text-xs font-normal mt-1">(ثبت شده)</span>}
+              {hasAssessment ? (
+                <span className="block text-xs font-normal mt-1">(ثبت شده)</span>
+              ) : (
+                <span className="block text-xs font-normal text-slate-400 dark:text-slate-500 mt-1">(ثبت نشده)</span>
+              )}
             </button>
           )
         })}
@@ -478,10 +496,12 @@ const StaffMemberView: React.FC<StaffMemberViewProps> = ({
                         <span className="text-lg">برنامه بهبود</span>
                     </button>
                 )}
-                <button onClick={() => setCurrentScreen('summary_chart')} className={navButtonClass}>
-                    <ChartBarIcon className="w-12 h-12 text-teal-500"/>
-                    <span className="text-lg">نمودار پیشرفت</span>
-                </button>
+                {assessment && (
+                    <button onClick={() => setCurrentScreen('summary_chart')} className={navButtonClass}>
+                        <ChartBarIcon className="w-12 h-12 text-teal-500"/>
+                        <span className="text-lg">نمودار پیشرفت</span>
+                    </button>
+                )}
                 <button onClick={() => setCurrentScreen('exam_list')} className={navButtonClass}>
                     <ClipboardDocumentCheckIcon className="w-12 h-12 text-violet-500"/>
                     <span className="text-lg">آزمون‌ها</span>
@@ -656,9 +676,9 @@ const StaffMemberView: React.FC<StaffMemberViewProps> = ({
                         {progressChartInfo.data.length > 0 ? (
                             <div className="bg-slate-100 dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-700">
                                 <ResponsiveContainer width="100%" height={400}>
-                                    <LineChart data={progressChartInfo.data} margin={{ top: 5, right: 20, left: -20, bottom: 5 }}>
+                                    <LineChart data={progressChartInfo.data} margin={{ top: 5, right: 20, left: -20, bottom: 30 }}>
                                         <CartesianGrid strokeDasharray="5 5" stroke="rgba(100, 116, 139, 0.3)" />
-                                        <XAxis dataKey="name" tick={{ fill: 'currentColor', fontSize: 12 }} className="text-slate-500 dark:text-slate-400" padding={{ left: 30 }} />
+                                        <XAxis dataKey="name" tick={{ fill: 'currentColor', fontSize: 10 }} className="text-slate-500 dark:text-slate-400" angle={-45} textAnchor="end" height={40} interval={0} />
                                         <YAxis unit="%" domain={[0, 100]} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-slate-500 dark:text-slate-400" />
                                         <Tooltip cursor={{ stroke: '#94a3b8', strokeWidth: 1, strokeDasharray: '5 5' }} contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: '#334155', borderRadius: '0.5rem' }} labelStyle={{ color: '#f1f5f9' }} formatter={(value: number | null, name: string) => value === null ? ["ثبت نشده", name] : [`${value}%`, name]} />
                                         <Legend wrapperStyle={{ fontSize: '0.8rem' }} />
@@ -868,6 +888,38 @@ const StaffMemberView: React.FC<StaffMemberViewProps> = ({
 
         <SuggestionModal isOpen={isSuggestionModalOpen} onClose={() => setIsSuggestionModalOpen(false)} title={`برنامه پیشنهادی برای ${staffMember.name}`} content={suggestionContent} isLoading={isSuggestionLoading}/>
         {previewMaterial && <PreviewModal isOpen={!!previewMaterial} onClose={() => setPreviewMaterial(null)} material={previewMaterial}/>}
+        
+        <Modal 
+            isOpen={isConfirmationModalOpen} 
+            onClose={() => {
+                setIsConfirmationModalOpen(false);
+                setSelectedMonth(null);
+                setCurrentScreen('month_selection');
+            }} 
+            title={`عملکرد ماه ${selectedMonth}`}
+        >
+            <div className="text-center space-y-6">
+                <p className="text-lg">ارزیابی عملکرد برای این ماه ثبت نشده است. چه کاری می‌خواهید انجام دهید؟</p>
+                <div className="flex justify-center gap-4">
+                    <button
+                        onClick={() => {
+                            setIsConfirmationModalOpen(false);
+                            setIsChecklistModalOpen(true);
+                        }}
+                        className="px-6 py-2 font-semibold text-white bg-indigo-600 rounded-md hover:bg-indigo-700"
+                    >
+                        ثبت چک لیست
+                    </button>
+                    <button
+                        onClick={() => setIsConfirmationModalOpen(false)}
+                        className="px-6 py-2 font-semibold text-slate-700 bg-slate-100 rounded-md hover:bg-slate-200 dark:bg-slate-600 dark:text-slate-200 dark:hover:bg-slate-500"
+                    >
+                        ادامه بدون ثبت نمره
+                    </button>
+                </div>
+            </div>
+        </Modal>
+
         <Modal isOpen={isChecklistModalOpen} onClose={() => setIsChecklistModalOpen(false)} title={`ثبت ارزیابی برای ${selectedMonth}`}>
             <div className="space-y-4">
                 <p className="text-slate-600 dark:text-slate-300">یک روش برای ثبت ارزیابی انتخاب کنید:</p>
