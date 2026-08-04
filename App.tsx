@@ -128,23 +128,23 @@ const App: React.FC = () => {
       departments: [],
     };
     const { error } = await db.upsertHospital(newHospital);
-    if (error) alert(`خطا در افزودن بیمارستان: ${error.message}`);
-    else refreshData();
+    if (error) alert(`خطا در ذخیره ابری: ${error.message}`);
+    refreshData();
   };
 
   const handleAddDepartment = async (name: string, managerName: string, managerNationalId: string, managerPassword: string, staffCount: number, bedCount: number) => {
     if (!selectedHospitalId) return;
     const newDepartment: Department = { id: Date.now().toString(), name, managerName, managerNationalId, managerPassword, staffCount, bedCount, staff: [] };
     const { error } = await db.upsertDepartment(newDepartment, selectedHospitalId);
-    if (error) alert(`خطا در افزودن بخش: ${error.message}`);
-    else refreshData();
+    if (error) alert(`خطا در ذخیره ابری: ${error.message}`);
+    refreshData();
   };
   
   const handleAddStaff = async (departmentId: string, name: string, title: string, nationalId: string, password?: string) => {
     const newStaff: StaffMember = { id: Date.now().toString(), name, title, nationalId, password, assessments: [] };
     const { error } = await db.upsertStaff(newStaff, departmentId);
-    if (error) alert(`خطا در افزودن پرسنل: ${error.message}`);
-    else refreshData();
+    if (error) alert(`خطا در ذخیره ابری: ${error.message}`);
+    refreshData();
   };
 
   const handleAddOrUpdateAssessment = async (departmentId: string, staffId: string, month: string, year: number, skills: SkillCategory[], template?: Partial<NamedChecklistTemplate>) => {
@@ -162,8 +162,8 @@ const App: React.FC = () => {
               examSubmissions: existingAssessment?.examSubmissions || [],
           };
           const { error } = await db.upsertAssessment(newAssessment, staffId);
-          if (error) alert(`خطا در ذخیره ارزیابی: ${error.message}`);
-          else refreshData();
+          if (error) alert(`خطا در ذخیره ابری: ${error.message}`);
+          refreshData();
       }
   };
 
@@ -181,8 +181,8 @@ const App: React.FC = () => {
           else assessment.examSubmissions.push(submission);
           
           const { error } = await db.upsertAssessment(assessment, staffId);
-          if (error) alert(`خطا در ثبت آزمون: ${error.message}`);
-          else refreshData();
+          if (error) alert(`خطا در ذخیره ابری: ${error.message}`);
+          refreshData();
       }
   };
   
@@ -193,8 +193,8 @@ const App: React.FC = () => {
       if (department) {
           const updatedDepartment = { ...department, ...data };
           const { error } = await db.upsertDepartment(updatedDepartment, selectedHospitalId);
-          if (error) alert(`خطا در به‌روزرسانی بخش: ${error.message}`);
-          else refreshData();
+          if (error) alert(`خطا در ذخیره ابری: ${error.message}`);
+          refreshData();
       }
   };
 
@@ -205,8 +205,8 @@ const App: React.FC = () => {
       if (staff) {
           const updatedStaff = { ...staff, ...data };
           const { error } = await db.upsertStaff(updatedStaff, departmentId);
-          if (error) alert(`خطا در به‌روزرسانی پرسنل: ${error.message}`);
-          else refreshData();
+          if (error) alert(`خطا در ذخیره ابری: ${error.message}`);
+          refreshData();
       }
   };
 
