@@ -3,9 +3,9 @@ import { Hospital, LoggedInUser, UserRole, Department, StaffMember, Assessment, 
 // The type will be inferred from the supabase client instance.
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = 'https://etpitgyohgpbygyfgeyt.supabase.co'
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV0cGl0Z3lvaGdwYnlneWZnZXl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjExMjEzMTcsImV4cCI6MjA3NjY5NzMxN30.pVNJL7KxU4RQ2zMPqHE0kYkkhp1eNI7pjiwSlmRPEMg'
-const supabase: SupabaseClient = createClient(supabaseUrl, supabaseKey)
+const supabaseUrl = (import.meta.env && import.meta.env.VITE_SUPABASE_URL) || 'https://npyujcxsmvwmydtfwjjo.supabase.co';
+const supabaseKey = (import.meta.env && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) || 'sb_publishable_6jxWVzEvwuaxCs2SdluLhw_QkDWrEP0';
+const supabase: SupabaseClient = createClient(supabaseUrl, supabaseKey);
 
 const BUCKET_NAME = 'app_files';
 
@@ -151,8 +151,10 @@ export const saveAllHospitals = async (hospitals: Hospital[]): Promise<{ error: 
             console.error("Supabase upsert error:", supabaseError);
             let userFriendlyMessage = `خطا در ذخیره اطلاعات در پایگاه داده: ${supabaseError.message}`;
             
-            if (supabaseError.code === '42501' || supabaseError.message.includes('security policies')) {
-                userFriendlyMessage = `تغییرات توسط پایگاه داده رد شد.\nاین مشکل تقریباً همیشه به دلیل خط‌مشی‌های امنیتی (Row Level Security) در Supabase است.\nلطفاً وارد پنل Supabase خود شوید و اطمینان حاصل کنید که یک پالیسی برای اجازه عملیات 'UPDATE' و 'INSERT' روی جدول 'hospitals_json' وجود دارد. بدون این پالیسی، هیچ تغییری (مانند حذف یا افزودن) ذخیره نخواهد شد.`;
+            if (supabaseError.code === '42501' || (supabaseError.message && (supabaseError.message.includes('security policies') || supabaseError.message.includes('row-level security')))) {
+                userFriendlyMessage = `تغییرات به صورت محلی (مرورگر) ذخیره شد، اما همگام‌سازی ابری در Supabase انجام نشد.\nعلت: عدم وجود دسترسی (RLS Policy) روی جدول 'hospitals_json' در Supabase.\nلطفاً کدهای SQL مربوط به RLS را در Supabase اجرا کنید.`;
+            } else if (supabaseError.code === '42P01') {
+                userFriendlyMessage = `جدول 'hospitals_json' در Supabase پیدا نشد.\nتغییرات در حافظه محلی ذخیره شد. لطفاً اسکریپت ساخت جدول را در Supabase SQL Editor اجرا کنید.`;
             } else {
                  userFriendlyMessage += ` (کد خطا: ${supabaseError.code})`;
             }
