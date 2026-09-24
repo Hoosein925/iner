@@ -152,9 +152,11 @@ async function startServer() {
 
   app.use(express.json({ limit: '10mb' }));
 
+  const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'AQ.Ab8RN6KQFK6i005UzGLUkDlspec9H5XO9uK3OFvv8iM1K2CTDg';
+
   // Initialize Gemini AI Client
   const ai = new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY,
+    apiKey: GEMINI_API_KEY,
     httpOptions: {
       headers: {
         'User-Agent': 'aistudio-build',
@@ -164,7 +166,7 @@ async function startServer() {
 
   // Health check endpoint
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', hasGeminiKey: !!process.env.GEMINI_API_KEY });
+    res.json({ status: 'ok', hasGeminiKey: !!GEMINI_API_KEY });
   });
 
   // 1. Generate Individual Improvement Plan with Gemini AI
@@ -173,7 +175,7 @@ async function startServer() {
       const { staffName, staffTitle, weakSkills, supervisorMessage, managerMessage } = req.body;
       const weakCount = Array.isArray(weakSkills) ? weakSkills.length : 0;
 
-      if (!process.env.GEMINI_API_KEY) {
+      if (!GEMINI_API_KEY) {
         return res.json({
           plan: `# برنامه بهبود مهارتی و ارتقای بالینی ۳۰ روزه برای ${staffName} (${staffTitle || 'کادر درمان'})
 
@@ -293,7 +295,7 @@ ${managerMessage ? `\n> **پیام مسئول بخش:** ${managerMessage}\n` : '
 - برگزاری کارگاه‌های عملیاتی شبیه‌سازی سناریو در Skill Lab.
 - ارزشیابی مستقیم مهارت‌ها با آزمون DOPS بر بالین بیمار.`;
 
-      if (!process.env.GEMINI_API_KEY) {
+      if (!GEMINI_API_KEY) {
         return res.json({
           analysis: fallbackAnalysis
         });
@@ -335,7 +337,7 @@ ${managerMessage ? `\n> **پیام مسئول بخش:** ${managerMessage}\n` : '
         return res.status(400).json({ error: 'لطفاً سوال خود را وارد کنید.' });
       }
 
-      if (!process.env.GEMINI_API_KEY) {
+      if (!GEMINI_API_KEY) {
         return res.json({
           answer: `**پاسخ بازرسی بالینی به سوال شما درباره «${userQuery}»:**
 
@@ -396,7 +398,7 @@ ${skillsData ? `اطلاعات تکمیلی سنجه‌ها:\n${JSON.stringify(s
 
       const fallbackDescription = `برگزاری کارگاه بازآموزی فشرده و سنجش با آزمون عملی DOPS در بخش ${departmentName} برای ${lowCount} نفر پرسنل بر اساس پروتکل استاندارد کتاب‌های برونر-سودارث و پاتر-پری. ابزار پایش: ${protocol.monitoringMethod}.`;
 
-      if (!process.env.GEMINI_API_KEY) {
+      if (!GEMINI_API_KEY) {
         return res.json({
           title: `اقدام اصلاحی و بازآموزی سنجه: ${skillName}`,
           description: fallbackDescription,
@@ -666,7 +668,7 @@ ${staffMatrixSection}
         staffTitle
       });
 
-      if (!process.env.GEMINI_API_KEY) {
+      if (!GEMINI_API_KEY) {
         return res.json({
           plan: formatStructuredJsonToMarkdown(structuredData),
           structuredData
@@ -773,7 +775,7 @@ ${breakdown.inspectorAnalysisPrompt}
         );
       };
 
-      if (!process.env.GEMINI_API_KEY) {
+      if (!GEMINI_API_KEY) {
         return res.json({ training: buildFallbackTraining() });
       }
 
