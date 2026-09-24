@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, Suspense, useRef } from 'react';
-import { Department, StaffMember, View, SkillCategory, Assessment, Hospital, AppScreen, NamedChecklistTemplate, ExamTemplate, ExamSubmission, LoggedInUser, UserRole, TrainingMaterial, MonthlyTraining, NewsBanner, MonthlyWorkLog, Patient, ChatMessage, AdminMessage, NeedsAssessmentTopic, MonthlyNeedsAssessment } from './types';
+import { Department, StaffMember, View, SkillCategory, Assessment, Hospital, AppScreen, NamedChecklistTemplate, ExamTemplate, ExamSubmission, LoggedInUser, UserRole, TrainingMaterial, MonthlyTraining, NewsBanner, MonthlyWorkLog, Patient, ChatMessage, AdminMessage, NeedsAssessmentTopic, MonthlyNeedsAssessment, CustomCorrectiveAction } from './types';
 import LoadingSpinner from './components/LoadingSpinner';
 import AboutModal from './components/AboutModal';
 import LoginModal from './components/LoginModal';
@@ -7,25 +7,25 @@ import { SaveIcon } from './components/icons/SaveIcon';
 import { UploadIcon } from './components/icons/UploadIcon';
 import { InfoIcon } from './components/icons/InfoIcon';
 import { LogoutIcon } from './components/icons/LogoutIcon';
-import { BackIcon } from './components/icons/BackIcon';
 import * as db from './services/db';
 import Footer from './components/Footer';
 
-const WelcomeScreen = React.lazy(() => import('./components/WelcomeScreen'));
-const HospitalList = React.lazy(() => import('./components/HospitalList'));
-const DepartmentList = React.lazy(() => import('./components/DepartmentList'));
-const DepartmentView = React.lazy(() => import('./components/DepartmentView'));
-const StaffMemberView = React.lazy(() => import('./components/StaffMemberView'));
-const ChecklistManager = React.lazy(() => import('./components/ChecklistManager'));
-const ExamManager = React.lazy(() => import('./components/ExamManager'));
-const TrainingManager = React.lazy(() => import('./components/TrainingManager'));
-const AccreditationManager = React.lazy(() => import('./components/AccreditationManager'));
-const NewsBannerManager = React.lazy(() => import('./components/NewsBannerManager'));
-const PatientEducationManager = React.lazy(() => import('./components/PatientEducationManager'));
-const PatientPortalView = React.lazy(() => import('./components/PatientPortalView'));
-const AdminCommunicationView = React.lazy(() => import('./components/AdminCommunicationView'));
-const HospitalCommunicationView = React.lazy(() => import('./components/HospitalCommunicationView'));
-const NeedsAssessmentManager = React.lazy(() => import('./components/NeedsAssessmentManager'));
+import WelcomeScreen from './components/WelcomeScreen';
+import HospitalList from './components/HospitalList';
+import DepartmentList from './components/DepartmentList';
+import DepartmentView from './components/DepartmentView';
+import StaffMemberView from './components/StaffMemberView';
+import ChecklistManager from './components/ChecklistManager';
+import ExamManager from './components/ExamManager';
+import TrainingManager from './components/TrainingManager';
+import AccreditationManager from './components/AccreditationManager';
+import NewsBannerManager from './components/NewsBannerManager';
+import PatientEducationManager from './components/PatientEducationManager';
+import PatientPortalView from './components/PatientPortalView';
+import AdminCommunicationView from './components/AdminCommunicationView';
+import HospitalCommunicationView from './components/HospitalCommunicationView';
+import NeedsAssessmentManager from './components/NeedsAssessmentManager';
+import CorrectiveActionsView from './components/CorrectiveActionsView';
 
 // Type for file data passed from components to App
 interface FileUploadData {
@@ -44,6 +44,281 @@ const getCurrentJalaliYear = () => {
 };
 
 const ACTIVE_YEAR_KEY = 'app_active_year';
+const SESSION_USER_KEY = 'hospital_app_logged_in_user';
+const NAV_STATE_KEY = 'hospital_app_nav_state';
+
+interface NavigationState {
+  appScreen: AppScreen;
+  currentView: View;
+  selectedHospitalId: string | null;
+  selectedDepartmentId: string | null;
+  selectedStaffId: string | null;
+  depth?: number;
+}
+
+const getBackState = (state: NavigationState, user: LoggedInUser | null): NavigationState | null => {
+  if (!user) return null;
+
+  // 1. StaffMemberView
+  if (state.currentView === View.StaffMemberView) {
+    if (user.role === UserRole.Staff) return null;
+    return {
+      appScreen: AppScreen.MainApp,
+      currentView: View.DepartmentView,
+      selectedHospitalId: state.selectedHospitalId,
+      selectedDepartmentId: state.selectedDepartmentId,
+      selectedStaffId: null,
+    };
+  }
+
+  // 2. Department-level sub-views
+  if ([
+    View.ChecklistManager,
+    View.ExamManager,
+    View.TrainingManager,
+    View.PatientEducationManager,
+  ].includes(state.currentView)) {
+    return {
+      appScreen: AppScreen.MainApp,
+      currentView: View.DepartmentView,
+      selectedHospitalId: state.selectedHospitalId,
+      selectedDepartmentId: state.selectedDepartmentId,
+      selectedStaffId: null,
+    };
+  }
+
+  // 3. CorrectiveActions
+  if (state.currentView === View.CorrectiveActions) {
+    if (user.role === UserRole.Manager) {
+      return {
+        appScreen: AppScreen.MainApp,
+        currentView: View.DepartmentView,
+        selectedHospitalId: state.selectedHospitalId,
+        selectedDepartmentId: user.departmentId || state.selectedDepartmentId,
+        selectedStaffId: null,
+      };
+    }
+    if (state.selectedDepartmentId) {
+      return {
+        appScreen: AppScreen.MainApp,
+        currentView: View.DepartmentView,
+        selectedHospitalId: state.selectedHospitalId,
+        selectedDepartmentId: state.selectedDepartmentId,
+        selectedStaffId: null,
+      };
+    }
+    return {
+      appScreen: AppScreen.MainApp,
+      currentView: View.DepartmentList,
+      selectedHospitalId: state.selectedHospitalId,
+      selectedDepartmentId: null,
+      selectedStaffId: null,
+    };
+  }
+
+  // 4. DepartmentView
+  if (state.currentView === View.DepartmentView) {
+    if (user.role === UserRole.Manager) return null;
+    return {
+      appScreen: AppScreen.MainApp,
+      currentView: View.DepartmentList,
+      selectedHospitalId: state.selectedHospitalId,
+      selectedDepartmentId: null,
+      selectedStaffId: null,
+    };
+  }
+
+  // 5. Hospital-level sub-views
+  if ([
+    View.AccreditationManager,
+    View.NewsBannerManager,
+    View.HospitalCommunication,
+    View.NeedsAssessmentManager,
+  ].includes(state.currentView)) {
+    return {
+      appScreen: AppScreen.MainApp,
+      currentView: View.DepartmentList,
+      selectedHospitalId: state.selectedHospitalId,
+      selectedDepartmentId: null,
+      selectedStaffId: null,
+    };
+  }
+
+  // 6. AdminCommunication
+  if (state.currentView === View.AdminCommunication) {
+    return {
+      appScreen: AppScreen.HospitalList,
+      currentView: View.DepartmentList,
+      selectedHospitalId: null,
+      selectedDepartmentId: null,
+      selectedStaffId: null,
+    };
+  }
+
+  // 7. DepartmentList
+  if (state.currentView === View.DepartmentList) {
+    if (user.role === UserRole.Admin && state.appScreen === AppScreen.MainApp) {
+      return {
+        appScreen: AppScreen.HospitalList,
+        currentView: View.DepartmentList,
+        selectedHospitalId: null,
+        selectedDepartmentId: null,
+        selectedStaffId: null,
+      };
+    }
+    return null;
+  }
+
+  // 8. HospitalList
+  if (state.appScreen === AppScreen.HospitalList) {
+    return null;
+  }
+
+  return null;
+};
+
+const buildAncestryChain = (current: NavigationState, user: LoggedInUser | null): NavigationState[] => {
+  if (!user || current.appScreen === AppScreen.Welcome) {
+    return [{ ...current, depth: 0 }];
+  }
+  const chain: NavigationState[] = [current];
+  const visited = new Set<string>();
+  visited.add(`${current.appScreen}-${current.currentView}-${current.selectedHospitalId}-${current.selectedDepartmentId}-${current.selectedStaffId}`);
+
+  let prev = getBackState(current, user);
+  while (prev) {
+    const key = `${prev.appScreen}-${prev.currentView}-${prev.selectedHospitalId}-${prev.selectedDepartmentId}-${prev.selectedStaffId}`;
+    if (visited.has(key)) break;
+    visited.add(key);
+    chain.unshift(prev);
+    prev = getBackState(prev, user);
+  }
+
+  return chain.map((item, idx) => ({ ...item, depth: idx }));
+};
+
+const getInitialSession = (): { user: LoggedInUser | null; nav: NavigationState } => {
+  let user: LoggedInUser | null = null;
+  try {
+    const userStr = localStorage.getItem(SESSION_USER_KEY);
+    if (userStr) {
+      user = JSON.parse(userStr);
+    }
+  } catch (e) {
+    console.error("Could not parse user session from localStorage", e);
+  }
+
+  if (!user) {
+    return {
+      user: null,
+      nav: {
+        appScreen: AppScreen.Welcome,
+        currentView: View.DepartmentList,
+        selectedHospitalId: null,
+        selectedDepartmentId: null,
+        selectedStaffId: null,
+        depth: 0,
+      }
+    };
+  }
+
+  try {
+    const navStr = localStorage.getItem(NAV_STATE_KEY);
+    if (navStr) {
+      const parsed = JSON.parse(navStr);
+      if (parsed && typeof parsed.appScreen === 'number' && parsed.appScreen !== AppScreen.Welcome) {
+        return {
+          user,
+          nav: {
+            appScreen: parsed.appScreen,
+            currentView: typeof parsed.currentView === 'number' ? parsed.currentView : View.DepartmentList,
+            selectedHospitalId: parsed.selectedHospitalId ?? (user.hospitalId || null),
+            selectedDepartmentId: parsed.selectedDepartmentId ?? (user.departmentId || null),
+            selectedStaffId: parsed.selectedStaffId ?? (user.staffId || null),
+            depth: typeof parsed.depth === 'number' ? parsed.depth : 0,
+          }
+        };
+      }
+    }
+  } catch (e) {
+    console.error("Could not parse nav state from localStorage", e);
+  }
+
+  switch (user.role) {
+    case UserRole.Admin:
+      return {
+        user,
+        nav: {
+          appScreen: AppScreen.HospitalList,
+          currentView: View.DepartmentList,
+          selectedHospitalId: null,
+          selectedDepartmentId: null,
+          selectedStaffId: null,
+          depth: 0,
+        }
+      };
+    case UserRole.Supervisor:
+      return {
+        user,
+        nav: {
+          appScreen: AppScreen.MainApp,
+          currentView: View.DepartmentList,
+          selectedHospitalId: user.hospitalId || null,
+          selectedDepartmentId: null,
+          selectedStaffId: null,
+          depth: 0,
+        }
+      };
+    case UserRole.Manager:
+      return {
+        user,
+        nav: {
+          appScreen: AppScreen.MainApp,
+          currentView: View.DepartmentView,
+          selectedHospitalId: user.hospitalId || null,
+          selectedDepartmentId: user.departmentId || null,
+          selectedStaffId: null,
+          depth: 0,
+        }
+      };
+    case UserRole.Staff:
+      return {
+        user,
+        nav: {
+          appScreen: AppScreen.MainApp,
+          currentView: View.StaffMemberView,
+          selectedHospitalId: user.hospitalId || null,
+          selectedDepartmentId: user.departmentId || null,
+          selectedStaffId: user.staffId || null,
+          depth: 0,
+        }
+      };
+    case UserRole.Patient:
+      return {
+        user,
+        nav: {
+          appScreen: AppScreen.MainApp,
+          currentView: View.PatientPortal,
+          selectedHospitalId: user.hospitalId || null,
+          selectedDepartmentId: user.departmentId || null,
+          selectedStaffId: null,
+          depth: 0,
+        }
+      };
+    default:
+      return {
+        user,
+        nav: {
+          appScreen: AppScreen.Welcome,
+          currentView: View.DepartmentList,
+          selectedHospitalId: null,
+          selectedDepartmentId: null,
+          selectedStaffId: null,
+          depth: 0,
+        }
+      };
+  }
+};
 
 const getInitialActiveYear = (): number => {
     try {
@@ -62,17 +337,21 @@ const getInitialActiveYear = (): number => {
 
 
 const App: React.FC = () => {
-  const [hospitals, setHospitals] = useState<Hospital[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [appScreen, setAppScreen] = useState<AppScreen>(AppScreen.Welcome);
-  const [currentView, setCurrentView] = useState<View>(View.DepartmentList);
-  const [selectedHospitalId, setSelectedHospitalId] = useState<string | null>(null);
-  const [selectedDepartmentId, setSelectedDepartmentId] = useState<string | null>(null);
-  const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
+  const [hospitals, setHospitals] = useState<Hospital[]>(() => db.getHospitalsFromLocal());
+  const [isLoading, setIsLoading] = useState<boolean>(() => db.getHospitalsFromLocal().length === 0);
+  
+  const initialSession = getInitialSession();
+  const [loggedInUser, setLoggedInUser] = useState<LoggedInUser | null>(initialSession.user);
+  const [appScreen, setAppScreen] = useState<AppScreen>(initialSession.nav.appScreen);
+  const [currentView, setCurrentView] = useState<View>(initialSession.nav.currentView);
+  const [selectedHospitalId, setSelectedHospitalId] = useState<string | null>(initialSession.nav.selectedHospitalId);
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState<string | null>(initialSession.nav.selectedDepartmentId);
+  const [selectedStaffId, setSelectedStaffId] = useState<string | null>(initialSession.nav.selectedStaffId);
+  
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
-  const [loggedInUser, setLoggedInUser] = useState<LoggedInUser | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [activeYear, setActiveYear] = useState<number>(getInitialActiveYear());
@@ -85,20 +364,205 @@ const App: React.FC = () => {
     }
   }, [activeYear]);
 
-  const refreshData = useCallback(async () => {
-      console.log("Refreshing data...");
-      setIsLoading(true);
-      const data = await db.syncAndAssembleData();
-      setHospitals(data);
-      setIsLoading(false);
-      console.log("Data refresh complete.");
+  // Keep references for popstate event listener
+  const appScreenRef = useRef(appScreen);
+  const currentViewRef = useRef(currentView);
+  const selectedHospitalIdRef = useRef(selectedHospitalId);
+  const selectedDepartmentIdRef = useRef(selectedDepartmentId);
+  const selectedStaffIdRef = useRef(selectedStaffId);
+  const loggedInUserRef = useRef(loggedInUser);
+  const isAboutModalOpenRef = useRef(isAboutModalOpen);
+  const isLoginModalOpenRef = useRef(isLoginModalOpen);
+  const isProgrammaticBackRef = useRef(false);
+
+  useEffect(() => {
+    appScreenRef.current = appScreen;
+    currentViewRef.current = currentView;
+    selectedHospitalIdRef.current = selectedHospitalId;
+    selectedDepartmentIdRef.current = selectedDepartmentId;
+    selectedStaffIdRef.current = selectedStaffId;
+    loggedInUserRef.current = loggedInUser;
+    isAboutModalOpenRef.current = isAboutModalOpen;
+    isLoginModalOpenRef.current = isLoginModalOpen;
+  });
+
+  // Synchronize active session and navigation state with localStorage
+  useEffect(() => {
+    try {
+      if (loggedInUser) {
+        localStorage.setItem(SESSION_USER_KEY, JSON.stringify(loggedInUser));
+        if (appScreen !== AppScreen.Welcome) {
+          const navData: NavigationState = {
+            appScreen,
+            currentView,
+            selectedHospitalId,
+            selectedDepartmentId,
+            selectedStaffId,
+            depth: window.history.state?.depth ?? 0,
+          };
+          localStorage.setItem(NAV_STATE_KEY, JSON.stringify(navData));
+        }
+      } else {
+        localStorage.removeItem(SESSION_USER_KEY);
+        localStorage.removeItem(NAV_STATE_KEY);
+      }
+    } catch (e) {
+      console.error("Could not sync session to localStorage", e);
+    }
+  }, [loggedInUser, appScreen, currentView, selectedHospitalId, selectedDepartmentId, selectedStaffId]);
+
+  // Phone back button and browser history listener
+  useEffect(() => {
+    const currentUser = loggedInUserRef.current;
+    const currentNav: NavigationState = {
+      appScreen: appScreenRef.current,
+      currentView: currentViewRef.current,
+      selectedHospitalId: selectedHospitalIdRef.current,
+      selectedDepartmentId: selectedDepartmentIdRef.current,
+      selectedStaffId: selectedStaffIdRef.current,
+    };
+
+    // If reloading onto a nested page, construct browser history ancestry chain
+    if (!window.history.state || typeof window.history.state.depth !== 'number') {
+      const chain = buildAncestryChain(currentNav, currentUser);
+      if (chain.length > 0) {
+        try {
+          window.history.replaceState(chain[0], '');
+          for (let i = 1; i < chain.length; i++) {
+            window.history.pushState(chain[i], '');
+          }
+        } catch (e) {
+          console.warn("Could not set up history chain", e);
+        }
+      }
+    }
+
+    const handlePopState = (event: PopStateEvent) => {
+      // If back was triggered by in-app button, the state transition was already executed
+      if (isProgrammaticBackRef.current) {
+        return;
+      }
+
+      // 1. Close modals first if open
+      if (isAboutModalOpenRef.current) {
+        setIsAboutModalOpen(false);
+        return;
+      }
+      if (isLoginModalOpenRef.current) {
+        setIsLoginModalOpen(false);
+        return;
+      }
+
+      const state = event.state as NavigationState | null;
+      if (state && typeof state.appScreen === 'number') {
+        setAppScreen(state.appScreen);
+        setCurrentView(state.currentView ?? View.DepartmentList);
+        setSelectedHospitalId(state.selectedHospitalId ?? null);
+        setSelectedDepartmentId(state.selectedDepartmentId ?? null);
+        setSelectedStaffId(state.selectedStaffId ?? null);
+      } else {
+        // Fallback: calculate deterministic previous state
+        const curr: NavigationState = {
+          appScreen: appScreenRef.current,
+          currentView: currentViewRef.current,
+          selectedHospitalId: selectedHospitalIdRef.current,
+          selectedDepartmentId: selectedDepartmentIdRef.current,
+          selectedStaffId: selectedStaffIdRef.current,
+        };
+        const prev = getBackState(curr, loggedInUserRef.current);
+        if (prev) {
+          setAppScreen(prev.appScreen);
+          setCurrentView(prev.currentView);
+          setSelectedHospitalId(prev.selectedHospitalId);
+          setSelectedDepartmentId(prev.selectedDepartmentId);
+          setSelectedStaffId(prev.selectedStaffId);
+          try {
+            window.history.replaceState(prev, '');
+          } catch (e) {}
+        }
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, []);
+
+  const lastDataJsonRef = useRef<string>(JSON.stringify(db.getHospitalsFromLocal()));
+
+  const refreshData = useCallback(async (showLoading = false) => {
+      if (showLoading) setIsLoading(true);
+      try {
+          const data = await db.syncAndAssembleData();
+          const jsonStr = JSON.stringify(data);
+          if (jsonStr !== lastDataJsonRef.current) {
+              lastDataJsonRef.current = jsonStr;
+              setHospitals(data);
+          }
+      } catch (err) {
+          console.warn("Sync warning:", err);
+      } finally {
+          if (showLoading) setIsLoading(false);
+      }
   }, []);
 
   useEffect(() => {
-    refreshData();
-    const unsubscribe = db.onRemoteChange(refreshData);
-    return () => unsubscribe();
-  }, [refreshData]);
+    let isCancelled = false;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+    let isSyncing = false;
+
+    const performSyncCycle = async () => {
+      if (isCancelled || isSyncing) return;
+      // Skip if a write/save is currently occurring to protect active user changes
+      if (db.isWriting()) return;
+
+      isSyncing = true;
+      try {
+        const data = await db.syncAndAssembleData();
+        if (!isCancelled && !db.isWriting()) {
+          const jsonStr = JSON.stringify(data);
+          // Only trigger state update if data actually changed (prevents unnecessary re-renders)
+          if (jsonStr !== lastDataJsonRef.current) {
+            lastDataJsonRef.current = jsonStr;
+            setHospitals(data);
+          }
+        }
+      } catch (e) {
+        // Silent error handling: network blips will not disrupt user experience
+      } finally {
+        isSyncing = false;
+        setIsLoading(false);
+      }
+    };
+
+    // Initial background sync
+    performSyncCycle();
+
+    // 1-second auto-reload cycle without blocking user input or causing UI lag
+    const scheduleNext = () => {
+      if (isCancelled) return;
+      timerId = setTimeout(async () => {
+        if (typeof document === 'undefined' || !document.hidden) {
+          await performSyncCycle();
+        }
+        scheduleNext();
+      }, 1000);
+    };
+
+    scheduleNext();
+
+    // Real-time remote change listener
+    const unsubscribe = db.onRemoteChange(() => {
+      performSyncCycle();
+    });
+
+    return () => {
+      isCancelled = true;
+      if (timerId) clearTimeout(timerId);
+      unsubscribe();
+    };
+  }, []);
 
   const getAvailableYears = (allHospitals: Hospital[]): number[] => {
     const years = new Set<number>([getCurrentJalaliYear()]);
@@ -643,66 +1107,157 @@ const App: React.FC = () => {
   };
 
   // --- Navigation & Auth ---
-   const handleGoToWelcome = () => {
-    setAppScreen(AppScreen.Welcome);
-    setSelectedHospitalId(null);
-    setSelectedDepartmentId(null);
-    setSelectedStaffId(null);
-    setCurrentView(View.DepartmentList);
-    setLoggedInUser(null);
-  }
+  const navigateForward = (
+    newScreen: AppScreen,
+    newView: View,
+    newHospitalId?: string | null,
+    newDepartmentId?: string | null,
+    newStaffId?: string | null
+  ) => {
+    const effectiveHospitalId = newHospitalId !== undefined ? newHospitalId : selectedHospitalId;
+    const effectiveDepartmentId = newDepartmentId !== undefined ? newDepartmentId : selectedDepartmentId;
+    const effectiveStaffId = newStaffId !== undefined ? newStaffId : selectedStaffId;
+
+    const currentDepth = (window.history.state && typeof window.history.state.depth === 'number')
+      ? window.history.state.depth
+      : 0;
+    const nextDepth = currentDepth + 1;
+
+    const nextState: NavigationState = {
+      appScreen: newScreen,
+      currentView: newView,
+      selectedHospitalId: effectiveHospitalId,
+      selectedDepartmentId: effectiveDepartmentId,
+      selectedStaffId: effectiveStaffId,
+      depth: nextDepth,
+    };
+
+    try {
+      window.history.pushState(nextState, '');
+    } catch (e) {
+      console.error("pushState error", e);
+    }
+
+    setAppScreen(newScreen);
+    setCurrentView(newView);
+    setSelectedHospitalId(effectiveHospitalId);
+    setSelectedDepartmentId(effectiveDepartmentId);
+    setSelectedStaffId(effectiveStaffId);
+  };
+
+  const openSubView = (view: View, overrideDeptId?: string) => {
+    navigateForward(
+      appScreen,
+      view,
+      selectedHospitalId,
+      overrideDeptId !== undefined ? overrideDeptId : selectedDepartmentId,
+      null
+    );
+  };
+
+  const handleGoToWelcome = () => {
+    handleLogout();
+  };
 
   const handleSelectHospital = (id: string) => {
-    setSelectedHospitalId(id);
-    setAppScreen(AppScreen.MainApp);
-    setCurrentView(View.DepartmentList);
+    navigateForward(AppScreen.MainApp, View.DepartmentList, id, null, null);
   };
 
   const handleSelectDepartment = (id: string) => {
-    setSelectedDepartmentId(id);
-    setCurrentView(View.DepartmentView);
+    navigateForward(AppScreen.MainApp, View.DepartmentView, selectedHospitalId, id, null);
   };
 
   const handleSelectStaff = (id: string) => {
-    setSelectedStaffId(id);
-    setCurrentView(View.StaffMemberView);
+    navigateForward(AppScreen.MainApp, View.StaffMemberView, selectedHospitalId, selectedDepartmentId, id);
+  };
+
+  const handleAddCustomCorrectiveAction = async (departmentId: string, actionData: Omit<CustomCorrectiveAction, 'id' | 'createdAt'>) => {
+    const hospital = findHospital(selectedHospitalId);
+    if (!hospital) return;
+    const dept = hospital.departments.find(d => d.id === departmentId);
+    if (!dept) return;
+
+    if (!dept.correctiveActions) dept.correctiveActions = [];
+    const newAction: CustomCorrectiveAction = {
+      ...actionData,
+      id: `ca-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      createdAt: new Date().toISOString(),
+    };
+    dept.correctiveActions.push(newAction);
+
+    const { error } = await db.upsertDepartment(dept, hospital.id);
+    if (error) alert(`خطا در ثبت اقدام اصلاحی: ${error.message}`);
+    else refreshData();
+  };
+
+  const handleToggleCustomCorrectiveActionStatus = async (departmentId: string, actionId: string) => {
+    const hospital = findHospital(selectedHospitalId);
+    if (!hospital) return;
+    const dept = hospital.departments.find(d => d.id === departmentId);
+    if (!dept || !dept.correctiveActions) return;
+
+    const action = dept.correctiveActions.find(ca => ca.id === actionId);
+    if (action) {
+      action.status = action.status === 'completed' ? 'pending' : 'completed';
+      const { error } = await db.upsertDepartment(dept, hospital.id);
+      if (error) alert(`خطا در تغییر وضعیت اقدام اصلاحی: ${error.message}`);
+      else refreshData();
+    }
+  };
+
+  const handleDeleteCustomCorrectiveAction = async (departmentId: string, actionId: string) => {
+    const hospital = findHospital(selectedHospitalId);
+    if (!hospital) return;
+    const dept = hospital.departments.find(d => d.id === departmentId);
+    if (!dept || !dept.correctiveActions) return;
+
+    dept.correctiveActions = dept.correctiveActions.filter(ca => ca.id !== actionId);
+    const { error } = await db.upsertDepartment(dept, hospital.id);
+    if (error) alert(`خطا در حذف اقدام اصلاحی: ${error.message}`);
+    else refreshData();
   };
 
   const handleBack = () => {
-    if (!loggedInUser) {
-        handleLogout();
-        return;
+    if (isAboutModalOpen) {
+      setIsAboutModalOpen(false);
+      return;
     }
-    switch (currentView) {
-      case View.StaffMemberView:
-        if (loggedInUser.role === UserRole.Staff) { handleLogout(); return; }
-        setSelectedStaffId(null);
-        setCurrentView(View.DepartmentView);
-        break;
-      case View.ChecklistManager:
-      case View.ExamManager:
-      case View.TrainingManager:
-      case View.PatientEducationManager:
-        setCurrentView(View.DepartmentView);
-        break;
-      case View.DepartmentView:
-        if (loggedInUser.role === UserRole.Manager) { handleLogout(); return; }
-        setSelectedDepartmentId(null);
-        setCurrentView(View.DepartmentList);
-        break;
-      case View.AccreditationManager:
-      case View.NewsBannerManager:
-      case View.HospitalCommunication:
-      case View.AdminCommunication:
-      case View.NeedsAssessmentManager:
-        setCurrentView(View.DepartmentList);
-        break;
-      case View.DepartmentList:
-         if (loggedInUser.role === UserRole.Supervisor) { handleLogout(); return; }
-        setSelectedHospitalId(null);
-        if (loggedInUser.role === UserRole.Admin) setAppScreen(AppScreen.HospitalList);
-        else handleLogout();
-        break;
+    if (isLoginModalOpen) {
+      setIsLoginModalOpen(false);
+      return;
+    }
+
+    const currentNav: NavigationState = {
+      appScreen,
+      currentView,
+      selectedHospitalId,
+      selectedDepartmentId,
+      selectedStaffId,
+    };
+    const prev = getBackState(currentNav, loggedInUser);
+    if (prev) {
+      // 1. Immediately update state so in-app back buttons react instantly
+      setAppScreen(prev.appScreen);
+      setCurrentView(prev.currentView);
+      setSelectedHospitalId(prev.selectedHospitalId);
+      setSelectedDepartmentId(prev.selectedDepartmentId);
+      setSelectedStaffId(prev.selectedStaffId);
+
+      // 2. Synchronize browser history
+      const depth = window.history.state?.depth;
+      if (typeof depth === 'number' && depth > 0) {
+        isProgrammaticBackRef.current = true;
+        try {
+          window.history.back();
+        } catch (e) {}
+        setTimeout(() => {
+          isProgrammaticBackRef.current = false;
+        }, 300);
+      } else {
+        try {
+          window.history.replaceState(prev, '');
+        } catch (e) {}
+      }
     }
   };
 
@@ -716,30 +1271,69 @@ const App: React.FC = () => {
           setLoggedInUser(user);
           setIsLoginModalOpen(false);
 
+          let targetScreen = AppScreen.MainApp;
+          let targetView = View.DepartmentList;
+          let targetHospId: string | null = null;
+          let targetDeptId: string | null = null;
+          let targetStaffId: string | null = null;
+
           switch(user.role) {
-            case UserRole.Admin: setAppScreen(AppScreen.HospitalList); break;
-            case UserRole.Supervisor: handleSelectHospital(user.hospitalId!); break;
+            case UserRole.Admin:
+              targetScreen = AppScreen.HospitalList;
+              targetView = View.DepartmentList;
+              break;
+            case UserRole.Supervisor:
+              targetScreen = AppScreen.MainApp;
+              targetView = View.DepartmentList;
+              targetHospId = user.hospitalId || null;
+              break;
             case UserRole.Manager:
-              handleSelectHospital(user.hospitalId!);
-              handleSelectDepartment(user.departmentId!);
+              targetScreen = AppScreen.MainApp;
+              targetView = View.DepartmentView;
+              targetHospId = user.hospitalId || null;
+              targetDeptId = user.departmentId || null;
               break;
             case UserRole.Staff:
-              handleSelectHospital(user.hospitalId!);
-              handleSelectDepartment(user.departmentId!);
-              handleSelectStaff(user.staffId!);
+              targetScreen = AppScreen.MainApp;
+              targetView = View.StaffMemberView;
+              targetHospId = user.hospitalId || null;
+              targetDeptId = user.departmentId || null;
+              targetStaffId = user.staffId || null;
               break;
             case UserRole.Patient:
               const patientDept = findHospital(user.hospitalId!)?.departments.find(d => d.id === user.departmentId!);
               if (patientDept?.patients?.find(p => p.id === user.patientId!)) {
-                  setSelectedHospitalId(user.hospitalId!);
-                  setSelectedDepartmentId(user.departmentId!);
-                  setAppScreen(AppScreen.MainApp);
-                  setCurrentView(View.PatientPortal);
+                  targetScreen = AppScreen.MainApp;
+                  targetView = View.PatientPortal;
+                  targetHospId = user.hospitalId || null;
+                  targetDeptId = user.departmentId || null;
               } else {
                   setLoginError('اطلاعات بیمار یافت نشد.');
+                  return;
               }
               break;
           }
+
+          const targetState: NavigationState = {
+            appScreen: targetScreen,
+            currentView: targetView,
+            selectedHospitalId: targetHospId,
+            selectedDepartmentId: targetDeptId,
+            selectedStaffId: targetStaffId,
+            depth: 0,
+          };
+
+          try {
+            window.history.replaceState(targetState, '');
+            localStorage.setItem(SESSION_USER_KEY, JSON.stringify(user));
+            localStorage.setItem(NAV_STATE_KEY, JSON.stringify(targetState));
+          } catch (e) {}
+
+          setAppScreen(targetScreen);
+          setCurrentView(targetView);
+          setSelectedHospitalId(targetHospId);
+          setSelectedDepartmentId(targetDeptId);
+          setSelectedStaffId(targetStaffId);
       } else {
           setLoginError('کد ملی یا رمز عبور نامعتبر است.');
       }
@@ -747,7 +1341,37 @@ const App: React.FC = () => {
   
   const handleLogout = () => {
       setLoggedInUser(null);
-      handleGoToWelcome();
+      try {
+        localStorage.removeItem(SESSION_USER_KEY);
+        localStorage.removeItem(NAV_STATE_KEY);
+      } catch (e) {}
+
+      const welcomeState: NavigationState = {
+        appScreen: AppScreen.Welcome,
+        currentView: View.DepartmentList,
+        selectedHospitalId: null,
+        selectedDepartmentId: null,
+        selectedStaffId: null,
+        depth: 0,
+      };
+
+      try {
+        window.history.replaceState(welcomeState, '');
+      } catch (e) {}
+
+      setAppScreen(AppScreen.Welcome);
+      setSelectedHospitalId(null);
+      setSelectedDepartmentId(null);
+      setSelectedStaffId(null);
+      setCurrentView(View.DepartmentList);
+  };
+
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    await refreshData(false);
+    setTimeout(() => {
+      setIsRefreshing(false);
+    }, 400);
   };
 
   // --- Data Handlers for Backups ---
@@ -832,6 +1456,15 @@ const App: React.FC = () => {
 
     if (!loggedInUser) return renderUnauthorized();
 
+    if (isLoading && hospitals.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[300px] gap-4">
+          <LoadingSpinner />
+          <p className="text-slate-600 dark:text-slate-300 font-medium">در حال بارگذاری و بازیابی اطلاعات...</p>
+        </div>
+      );
+    }
+
     if (appScreen === AppScreen.HospitalList) {
       if (loggedInUser.role !== UserRole.Admin) return renderUnauthorized();
 
@@ -859,16 +1492,27 @@ const App: React.FC = () => {
         onSelectHospital={handleSelectHospital}
         onGoToWelcome={handleGoToWelcome}
         userRole={loggedInUser.role}
-        onContactAdmin={() => setCurrentView(View.AdminCommunication)}
+        onContactAdmin={() => openSubView(View.AdminCommunication)}
       />;
     }
 
     const selectedHospital = findHospital(selectedHospitalId);
-    const selectedDepartment = findDepartment(selectedHospital, selectedDepartmentId);
+    const effectiveDepartmentId = selectedDepartmentId || (loggedInUser?.role === UserRole.Manager ? loggedInUser.departmentId : undefined);
+    const selectedDepartment = findDepartment(selectedHospital, effectiveDepartmentId);
     const selectedStaffMember = findStaffMember(selectedDepartment, selectedStaffId);
 
-    if (!selectedHospital && appScreen === AppScreen.MainApp && loggedInUser.role !== UserRole.Patient) return renderUnauthorized();
-    if (!selectedHospital) return <div>Hospital not found error.</div>;
+    if (!selectedHospital && appScreen === AppScreen.MainApp && loggedInUser.role !== UserRole.Patient) {
+      if (isLoading) {
+        return (
+          <div className="flex flex-col items-center justify-center min-h-[300px] gap-4">
+            <LoadingSpinner />
+            <p className="text-slate-600 dark:text-slate-300 font-medium">در حال بازیابی اطلاعات بیمارستان...</p>
+          </div>
+        );
+      }
+      return renderUnauthorized();
+    }
+    if (!selectedHospital) return <div className="p-8 text-center text-slate-600 dark:text-slate-400">اطلاعات بیمارستان یافت نشد.</div>;
 
     switch (currentView) {
       case View.DepartmentList:
@@ -877,24 +1521,48 @@ const App: React.FC = () => {
           onAddDepartment={handleAddDepartment}
           onUpdateDepartment={handleUpdateDepartment}
           onDeleteDepartment={async (id) => await db.deleteDepartment(id).then(res => !res.error && refreshData())}
-          onSelectDepartment={handleSelectDepartment} onBack={handleBack} onManageAccreditation={() => setCurrentView(View.AccreditationManager)}
-          onManageNewsBanners={() => setCurrentView(View.NewsBannerManager)} onManageNeedsAssessment={() => setCurrentView(View.NeedsAssessmentManager)}
-          onResetHospital={handleResetHospital} onContactAdmin={() => setCurrentView(View.HospitalCommunication)}
+          onSelectDepartment={handleSelectDepartment} onBack={handleBack} onManageAccreditation={() => openSubView(View.AccreditationManager)}
+          onManageNewsBanners={() => openSubView(View.NewsBannerManager)} onManageNeedsAssessment={() => openSubView(View.NeedsAssessmentManager)}
+          onManageCorrectiveActions={() => openSubView(View.CorrectiveActions)}
+          onResetHospital={handleResetHospital} onContactAdmin={() => openSubView(View.HospitalCommunication)}
           onArchiveYear={handleArchiveYear} userRole={loggedInUser.role} onReplaceHospitalData={handleReplaceHospitalData}
         />;
       case View.DepartmentView:
-        if (!selectedDepartment) return <div>Department not found.</div>;
+        if (!selectedDepartment) {
+          if (isLoading) {
+            return (
+              <div className="flex flex-col items-center justify-center min-h-[300px] gap-4">
+                <LoadingSpinner />
+                <p className="text-slate-600 dark:text-slate-300 font-medium">در حال بازیابی اطلاعات بخش...</p>
+              </div>
+            );
+          }
+          return <div className="p-8 text-center text-slate-600 dark:text-slate-400">اطلاعات بخش یافت نشد.</div>;
+        }
         return <DepartmentView
           department={selectedDepartment} hospitalId={selectedHospital.id} onBack={handleBack} onAddStaff={handleAddStaff} onUpdateStaff={handleUpdateStaff}
           onDeleteStaff={async (deptId, staffId) => await db.deleteStaff(staffId).then(res => !res.error && refreshData())}
           onSelectStaff={handleSelectStaff} onComprehensiveImport={handleComprehensiveImport}
-          onManageChecklists={() => setCurrentView(View.ChecklistManager)} onManageExams={() => setCurrentView(View.ExamManager)}
-          onManageTraining={() => setCurrentView(View.TrainingManager)} onManagePatientEducation={() => setCurrentView(View.PatientEducationManager)}
+          onManageChecklists={() => openSubView(View.ChecklistManager)} onManageExams={() => openSubView(View.ExamManager)}
+          onManageTraining={() => openSubView(View.TrainingManager)} onManagePatientEducation={() => openSubView(View.PatientEducationManager)}
+          onManageCorrectiveActions={() => {
+            openSubView(View.CorrectiveActions, selectedDepartment.id);
+          }}
           onAddOrUpdateWorkLog={handleAddOrUpdateWorkLog} onReplaceDepartmentData={handleReplaceDepartmentData}
           userRole={loggedInUser.role} newsBanners={selectedHospital.newsBanners || []} activeYear={activeYear}
         />;
       case View.StaffMemberView:
-        if (!selectedDepartment || !selectedStaffMember) return <div>Staff not found.</div>;
+        if (!selectedDepartment || !selectedStaffMember) {
+          if (isLoading) {
+            return (
+              <div className="flex flex-col items-center justify-center min-h-[300px] gap-4">
+                <LoadingSpinner />
+                <p className="text-slate-600 dark:text-slate-300 font-medium">در حال بازیابی اطلاعات پرسنل...</p>
+              </div>
+            );
+          }
+          return <div className="p-8 text-center text-slate-600 dark:text-slate-400">اطلاعات پرسنل یافت نشد.</div>;
+        }
         return <StaffMemberView
           department={selectedDepartment} staffMember={selectedStaffMember} onBack={handleBack}
           onAddOrUpdateAssessment={handleAddOrUpdateAssessment} onUpdateAssessmentMessages={handleUpdateAssessmentMessages}
@@ -938,6 +1606,17 @@ const App: React.FC = () => {
         return <AdminCommunicationView hospitals={hospitals} onSendMessage={(hospitalId, content) => handleAdminOrHospitalMessageSend(hospitalId, 'admin', content)} onBack={handleBack} onRefreshChat={refreshData} />;
       case View.NeedsAssessmentManager:
         return <NeedsAssessmentManager hospital={selectedHospital} onUpdateTopics={handleUpdateNeedsAssessmentTopics} onBack={handleBack} activeYear={activeYear} />;
+      case View.CorrectiveActions:
+        return <CorrectiveActionsView
+          hospital={selectedHospital}
+          departmentId={selectedDepartmentId || loggedInUser?.departmentId}
+          onBack={handleBack}
+          onAddCustomAction={handleAddCustomCorrectiveAction}
+          onToggleActionStatus={handleToggleCustomCorrectiveActionStatus}
+          onDeleteCustomAction={handleDeleteCustomCorrectiveAction}
+          userRole={loggedInUser.role}
+          activeYear={activeYear}
+        />;
       default:
         return <div>Unhandled view state.</div>;
     }
@@ -973,16 +1652,12 @@ const App: React.FC = () => {
             <header className="fixed top-0 left-0 right-0 z-40 bg-gradient-to-r from-purple-600 to-indigo-700 shadow-lg text-white">
                 <div className="container mx-auto px-4 sm:px-6 lg:px-8 h-16 flex justify-between items-center">
                     <div className="flex items-center gap-4">
-                      {(loggedInUser && (appScreen === AppScreen.MainApp || appScreen === AppScreen.HospitalList)) && (
-                          <button onClick={handleBack} className="p-2 rounded-full hover:bg-white/20 transition-colors">
-                            <BackIcon className="w-6 h-6 text-cyan-300"/>
-                          </button>
-                      )}
-                      <h1 className="text-xl font-bold">سامانه بیمارستان من</h1>
+                      <h1 className="text-xl font-bold whitespace-nowrap">سامانه جهش</h1>
                     </div>
 
                     <div className="flex items-center gap-2 sm:gap-3">
                         {loggedInUser && <span className="text-sm font-semibold hidden md:inline">خوش آمدید، {loggedInUser.name}</span>}
+
                         <button onClick={() => setIsAboutModalOpen(true)} className="flex items-center gap-2 px-3 py-1.5 text-sm font-semibold bg-yellow-400 text-slate-800 rounded-lg shadow-sm hover:bg-yellow-500 transition-colors" aria-label="درباره">
                             <InfoIcon className="w-5 h-5"/>
                             <span className="hidden sm:inline">درباره</span>

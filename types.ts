@@ -3,6 +3,7 @@
 export interface SkillItem {
   description: string;
   score: number;
+  radif?: number;
 }
 
 export interface SkillCategory {
@@ -119,6 +120,19 @@ export interface Patient {
   chatHistory?: ChatMessage[];
 }
 
+export interface CustomCorrectiveAction {
+  id: string;
+  departmentId: string;
+  title: string;
+  description: string;
+  responsiblePerson: string;
+  deadline?: string;
+  priority: 'high' | 'medium' | 'low';
+  status: 'pending' | 'in_progress' | 'completed';
+  createdAt: string;
+  month?: string;
+}
+
 export interface Department {
   id: string;
   name: string;
@@ -131,6 +145,7 @@ export interface Department {
   patientEducationMaterials?: TrainingMaterial[];
   trainingMaterials?: MonthlyTraining[]; // Moved from Hospital to here
   patients?: Patient[];
+  correctiveActions?: CustomCorrectiveAction[];
 }
 
 export interface TrainingMaterial {
@@ -224,6 +239,7 @@ export enum View {
   HospitalCommunication,
   AdminCommunication,
   NeedsAssessmentManager,
+  CorrectiveActions,
 }
 
 export enum UserRole {
