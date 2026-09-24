@@ -134,27 +134,8 @@ export const askCustomQuestionWithAI = async (params: {
     const data = await response.json();
     return data.answer || "پاسخی دریافت نشد.";
   } catch (err) {
-    console.warn("Failed to ask custom question to AI server-side, trying client AI fallback:", err);
-    try {
-      if (CLIENT_GEMINI_API_KEY) {
-        const clientAi = new GoogleGenAI({ apiKey: CLIENT_GEMINI_API_KEY });
-        const prompt = `شما مشاور ارشد اعتباربخشی و آموزش پرستاری بیمارستان هستید.
-کانتکست: "${params.contextName}" | میانگین کل: ${params.overallAvg}% | عمومی: ${params.genAvg}% | تخصصی: ${params.specAvg}% | ارتباطی: ${params.commAvg}%
-سوال کاربر: "${params.userQuery}"
-پاسخ دقیق، علمی، کاربردی و منطبق بر گایدلاین‌های بالینی و استانداردهای اعتباربخشی ارائه دهید.`;
-
-        const res = await clientAi.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: prompt,
-        });
-        if (res.text && res.text.trim().length > 10) {
-          return res.text;
-        }
-      }
-    } catch (clientErr) {
-      console.warn("Client Gemini fallback error for askCustomQuestionWithAI:", clientErr);
-    }
-    return `پاسخ به سوال شما درباره «${params.userQuery}»:\nبر اساس میانگین کل ${params.overallAvg}٪، اولویت ارتقا بر مبنای راهنماهای بالینی و استانداردهای اعتباربخشی، تقویت سنجه‌های حیاتی با نمره کمتر از ۷۵٪ است. نظارت بالینی مستقیم در شیفت و آموزش‌های عملیاتی کارگاهی توصیه می‌شود.`;
+    console.error("Failed to ask custom question to AI:", err);
+    return `پاسخ به سوال شما بر اساس شاخص‌ها: میانگین کل ${params.overallAvg}٪ می‌باشد. اتصال سرور را بررسی نمایید.\n\n${OFFICIAL_SOURCES_WITH_MONITORING}`;
   }
 };
 
@@ -226,37 +207,7 @@ export const generatePeriodicPlanWithAI = async (params: {
     const data = await response.json();
     return data.plan || "برنامه‌ای دریافت نشد.";
   } catch (err) {
-    console.warn("Failed to generate periodic plan with AI server-side, attempting direct client AI fallback:", err);
-
-    // Direct client-side Gemini fallback
-    try {
-      if (CLIENT_GEMINI_API_KEY) {
-        const clientAi = new GoogleGenAI({ apiKey: CLIENT_GEMINI_API_KEY });
-        const target = params.mode === 'staff'
-          ? `پرسنل محترم ${params.staffName} (${params.staffTitle || 'کارشناس بالینی'}) - بخش ${params.departmentName}`
-          : `کلیه پرسنل بخش ${params.departmentName}`;
-
-        const prompt = `شما هوش مصنوعی ارشد و تخصصی سامانه آموزش و ارزیابی شایستگی عملکردی پرستاری هستید.
-برنامه درخواستی: ${params.mode === 'hospital' ? 'سطح بیمارستان' : params.mode === 'department' ? 'سطح بخش' : 'سطح فردی پرسنل'}
-اطلاعات: ${target} | میانگین کل: ${params.overallAvg}% | عمومی: ${params.genAvg}% | اختصاصی: ${params.specAvg}% | ارتباطی: ${params.commAvg}%
-قوانین:
-۱. بدون آوردن نام یا متن مهارت‌ها، دیپ سرچ انجام داده و اقدامات اصلاحی عینی بنویسید (مانند: برگزاری کارگاه احیا، آموزش اکسیژن‌تراپی، کنترل عفونت و...).
-۲. ساختار شامل: ۱. تحلیل کلان و ریشه‌ای ۲. اقدامات اصلاحی متمرکز ۳. برنامه توانمندسازی ۳۰ روزه ۴. ماتریس عملیاتی پرسنل و مربیان بالینی.
-۳. مراجع ذکر نشود و لحن رسمی و سازمانی باشد.`;
-
-        const res = await clientAi.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: prompt,
-        });
-
-        if (res.text && res.text.trim().length > 50) {
-          return res.text;
-        }
-      }
-    } catch (clientErr) {
-      console.warn("Direct client Gemini fallback error, falling back to structured template:", clientErr);
-    }
-
+    console.error("Failed to generate periodic plan with AI:", err);
     const target = params.mode === 'staff' ? `پرسنل محترم ${params.staffName} (${params.staffTitle || 'کارشناس بالینی'}) - بخش ${params.departmentName}` : `کلیه پرسنل بخش ${params.departmentName}`;
 
     // Statistical breakdown
@@ -317,7 +268,7 @@ export const generatePeriodicPlanWithAI = async (params: {
 ## ۱. تحلیل کلان و ریشه‌ای شایستگی‌ها (Executive Synthesis)
 ارزیابی و دیپ سرچ عملکردی کادر بر مبنای حیطه‌های سه‌گانه و سطوح صلاحیت بالینی:
 - **مهارت‌های عمومی:** میانگین **${params.genAvg}٪** (اصول پایه ایمنی بیمار، کنترل عفونت و بهداشت دست)
-- **مهارت‌های اختصاصی:** میانگین **${params.specAvg}٪** (پروسیجرهای بالینی ویژه بخش ${params.departmentName})
+- **مهارت‌های اختصاصی:** میانگین **${specAvg || params.specAvg}٪** (پروسیجرهای بالینی ویژه بخش ${params.departmentName})
 - **مهارت‌های ارتباطی-رفتاری:** میانگین **${params.commAvg}٪** (آموزش به بیمار، تحویل شیفت با الگوی ISBAR و ارتباط بین‌حرفه‌ای)
 - **توزیع صلاحیت بالینی:** تعداد ${greenCount} سنجه در وضعیت تسلط مستقل (سبز)، ${yellowCount} سنجه در وضعیت رو به رشد (زرد)، و ${redCount + orangeCount} سنجه در رده نیازمند مداخله و آموزش مستقیم قرار دارند.
 
