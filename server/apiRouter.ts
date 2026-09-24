@@ -4,14 +4,9 @@ import {
   OFFICIAL_SOURCES_WITH_MONITORING,
   formatSkillsPercentageBreakdown,
   getClinicalProtocolForSkill,
-  groupSkillsIntoActionAxes,
   buildFourteenStepSkillTraining,
   buildStructuredNursingEvaluationJson,
   formatStructuredJsonToMarkdown,
-  deriveCorrectiveInterventionsFromSkills,
-  StructuredNursingEvaluation,
-  SkillSummaryItem,
-  ActionAxisItem
 } from './clinicalKnowledge';
 
 export const NURSING_AI_MISSION_INSTRUCTION = `تو هوش مصنوعی تخصصی سامانه آموزش، ارزیابی مهارت‌های عملکردی و بهبود مستمر پرستاری بیمارستان هستی.
@@ -143,7 +138,7 @@ async function callGeminiWithFallback(
 export function createApiRouter(): express.Router {
   const router = express.Router();
 
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'AQ.Ab8RN6KQFK6i005UzGLUkDlspec9H5XO9uK3OFvv8iM1K2CTDg';
+  const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'AQ.Ab8RN6Ibb3Wc27jXphyJCW9bvHvMGvMoDu4VJVQhGS6OTmtrYA';
 
   // Initialize Gemini AI Client
   const ai = new GoogleGenAI({
@@ -156,7 +151,7 @@ export function createApiRouter(): express.Router {
   });
 
   // Health check endpoint
-  router.get(['/health', '/api/health'], (req, res) => {
+  router.get(['/health', '/api/health'], (_req, res) => {
     res.json({ status: 'ok', hasGeminiKey: !!GEMINI_API_KEY });
   });
 
@@ -253,8 +248,7 @@ ${managerMessage ? `\n> **پیام مسئول بخش:** ${managerMessage}\n` : '
         overallAvg,
         genAvg,
         specAvg,
-        commAvg,
-        skillsNeedingTraining
+        commAvg
       } = req.body;
 
       const targetTitle = contextType === 'hospital' ? `کل بیمارستان ${hospitalName}` : `بخش ${departmentName}`;
@@ -322,7 +316,7 @@ ${managerMessage ? `\n> **پیام مسئول بخش:** ${managerMessage}\n` : '
   // 3. Custom Question to Gemini AI based on scores/skills
   router.post(['/gemini/ask-custom-question', '/api/gemini/ask-custom-question'], async (req, res) => {
     try {
-      const { contextName, evaluatedStaffCount, overallAvg, genAvg, specAvg, commAvg, userQuery, skillsData } = req.body;
+      const { contextName, overallAvg, genAvg, specAvg, commAvg, userQuery, skillsData } = req.body;
 
       if (!userQuery || typeof userQuery !== 'string' || userQuery.trim().length === 0) {
         return res.status(400).json({ error: 'لطفاً سوال خود را وارد کنید.' });
@@ -440,7 +434,6 @@ ${skillsData ? `اطلاعات تکمیلی سنجه‌ها:\n${JSON.stringify(s
         commAvg,
         totalStaffCount,
         skillsSummary,
-        weakSkills,
         staffList,
         staffDetails,
         supervisorMessage,
@@ -475,188 +468,15 @@ ${skillsData ? `اطلاعات تکمیلی سنجه‌ها:\n${JSON.stringify(s
         overallRiskColor = 'قرمز';
       }
 
-      const actionAxes = groupSkillsIntoActionAxes(skillsSummary || [], { departmentName, staffName, totalStaffCount });
-
-      // Build personalized, data-driven fallback plan if AI key missing or models fail
-      const buildFallbackPeriodicPlan = () => {
-        const redNames = breakdown.redSkills.map(s => `«${s.skillName}» (${s.percentage}٪)`).join('، ');
-        const orangeNames = breakdown.orangeSkills.map(s => `«${s.skillName}» (${s.percentage}٪)`).join('، ');
-        const yellowNames = breakdown.yellowSkills.map(s => `«${s.skillName}» (${s.percentage}٪)`).join('، ');
-        const greenNames = breakdown.greenSkills.map(s => `«${s.skillName}» (${s.percentage}٪)`).join('، ');
-
-        // 1. Level 1: Educational Supervisor (Hospital Level)
-        if (mode === 'hospital') {
-          let axesTable = `| ردیف | اولویت | محور اصلاحی | مشکل شناسایی‌شده | گروه / بخش‌های درگیر | اقدام اجرایی یکپارچه | مسئول اجرا | زمان اجرا | شاخص اثربخشی | وضعیت پیگیری |\n|:---:|:---:|:---|:---|:---:|:---|:---:|:---:|:---|:---:|\n`;
-          actionAxes.forEach((axis, idx) => {
-            axesTable += `| ${idx + 1} | ${axis.priority} | ${axis.axisTitle} | ${axis.identifiedProblem} | ${axis.involvedDepartmentsOrStaff} | ${axis.integratedAction} | ${axis.responsibleRole} | ${axis.timeframe} | ${axis.effectivenessMetric} | 🟡 در حال اقدام |\n`;
-          });
-
-          return `# برنامه راهبردی و تحلیل هوش مصنوعی بیمارستان (سطح سوپروایزر آموزشی)
-**سامانه آموزش، ارزیابی مهارت‌های عملکردی و بهبود مستمر پرستاری بیمارستان**
-**مرکز درمانی:** ${hospitalName || 'بیمارستان'} | **میانگین کل شایستگی بیمارستان:** **${overallAvg}٪** (رتبه: **${overallRank}** - رنگ ریسک: **${overallRiskColor}**)
-**حیطه‌ها:** عمومی: **${genAvg}٪** | اختصاصی: **${specAvg}٪** | ارتباطی-رفتاری: **${commAvg}٪** | پرسنل پایش‌شده: **${totalStaffCount || 'کلیه کادر بالینی'}**
-
----
-
-## ۱. تحلیل کلان و ریشه‌ای بیمارستان (Executive Synthesis)
-- **واکاوی داده‌های ارزیابی:** میانگین شایستگی عملکردی کل پرستاری به میزان **${overallAvg}٪** ثبت گردیده که حاکی از استقرار وضعیت شایستگی **${overallRank}** در سازمان است.
-- **ظرفیت‌های منتورشیپ سازمانی:** کادر بالینی در ${breakdown.greenSkills.length} سنجه به سطح تسلط مستقل (سبز) دست یافته‌اند. پرسنل صاحب امتیاز ۳ و ۴ در این حیطه‌ها به عنوان سرمایه‌های آموزش بالینی بیمارستان عمل می‌نمایند.
-- **نقاط نیازمند مداخله و اصلاح ریشه‌ای:** تعداد **${actionAxes.filter(a => a.priority === 1).length}** محور اصلاحی بحرانی (اولویت ۱) و **${actionAxes.filter(a => a.priority === 2).length}** محور اولویت ۲ شناسایی گردید که نیازمند مداخله آموزشی متمرکز هستند.
-
----
-
-## ۲. اولویت‌های اصلی و برنامه‌های اصلاحی بیمارستان (Hospital Core Priorities)
-${actionAxes.map((axis, i) => `### ۲.${i + 1}. ${axis.axisTitle} (${axis.priorityLabel})
-- **دلیل انتخاب اولویت:** ${axis.identifiedProblem}
-- **گروه و بخش‌های هدف:** ${axis.involvedDepartmentsOrStaff}
-- **اقدام اصلاحی یکپارچه:** ${axis.integratedAction}
-- **مسئول پیشنهادی و زمان‌بندی:** ${axis.responsibleRole} | مهلت: ${axis.timeframe}
-- **شاخص اثربخشی:** ${axis.effectivenessMetric}
-`).join('\n')}
-
----
-
-## ۳. ماتریس برنامه اجرایی آموزشی بیمارستان (Action Plan Matrix)
-جدول زیر بر اساس اصل تجمیع هوشمند حوزه‌های هم‌پوشان و پرهیز از تکرار سنجه‌ها تدوین شده است:
-
-${axesTable}
-
----
-
-## ۴. برنامه آموزشی و توانمندسازی دوره بعد (Hospital Educational Curriculum)
-تقویم توانمندسازی سوپروایزر آموزشی منحصراً بر خوشه‌های مهارتی و محورهای اولویت‌دار زیر متمرکز است:
-۱. **دوره جامع توانمندسازی احیای پیشرفته و مدیریت بحران بالینی:** ۴ ساعت تئوری + ۶ ساعت تمرین سناریومحور در Skill Lab بیمارستان.
-۲. **کارگاه بازآموزی تزریقات ایمن و مدیریت داروهای پرخطر (High-Alert Medications):** ارزیابی قبل و بعد با آزمون کتبی و چک‌لیست عملی.
-۳. **بوت‌کمپ استانداردهای کنترل عفونت، تکنیک‌های آسپتیک و مراقبت از کاتترها:** آموزش بر بالین همراه با ممیزی شیفتی توسط سرپرستاران.
-۴. **سمینار مهارت‌های ارتباطی پیشرفته، تحویل شیفت ایمن (ISBAR) و مستندسازی پرونده:** بر اساس استانداردهای اعتباربخشی.
-
----
-
-## ۵. اقدامات سیستمی و مدیریتی پشتیبان (Systemic & Structural Interventions)
-- **تجهیزات و زیرساخت:** تقویت تجهیزات مرکز مهارت‌های بالینی (Skill Lab) به مولاژهای تخصصی تزریق و احیا و به‌روزرسانی ترالی‌های احیا.
-- **تعدیل نیروی انسانی و چیدمان شیفت:** توزیع همگن پرسنل نمره ۴ (خبره) در کلیه شیفت‌های عصر و شب در کنار نیروهای نیازمند نظارت (نمره ۱ و ۲).
-- **بازنگری فرآیندها و دستورالعمل‌ها:** استقرار چک‌لیست‌های بالینی DOPS در بخش‌ها و الصاق گایدلاین‌های بالینی مصوب بر بالین بیمار.`;
-        }
-
-        // 2. Level 2: Department Head (Department Level)
-        if (mode === 'department') {
-          let deptAxesTable = `| ردیف | اولویت | محور اصلاحی | مسئله شناسایی‌شده | پرسنل هدف | اقدام اصلاحی مشخص | روش اجرا | مسئول | مهلت | شاخص اثربخشی | روش ارزیابی مجدد |\n|:---:|:---:|:---|:---|:---:|:---|:---|:---:|:---:|:---|:---:|\n`;
-          actionAxes.forEach((axis, idx) => {
-            deptAxesTable += `| ${idx + 1} | ${axis.priority} | ${axis.axisTitle} | ${axis.identifiedProblem} | کادر بالینی بخش | ${axis.integratedAction} | کارگاه و منتورشیپ | ${axis.responsibleRole} | ${axis.timeframe} | ${axis.effectivenessMetric} | ${axis.reassessmentMethod} |\n`;
-          });
-
-          // Generate clean staff operational matrix without dumping raw skills
-          let staffMatrixSection = '';
-          if (finalStaffList && finalStaffList.length > 0) {
-            let staffTable = `| ردیف | نام پرسنل | سمت | میانگین شایستگی | وضعیت نیاز به توانمندسازی | اقدام عملیاتی و مداخله آموزشی مشخص | مربی / منتور بالینی معین | مهلت اجرا | روش ارزیابی مجدد بر بالین |\n|:---:|:---|:---:|:---:|:---|:---|:---:|:---:|:---:|\n`;
-
-            finalStaffList.forEach((st: any, idx: number) => {
-              const weakSkills = st.weakSkills || [];
-              const weakCount = weakSkills.length;
-              const weakStatus = weakCount > 0
-                ? `دارای ${weakCount} سنجه نیازمند توانمندسازی (نمره زیر ۳)`
-                : 'تسلط کامل و مستقل (کلیه سنجه‌ها ۳ و بالاتر)';
-              const peerMentor = finalStaffList.find((p: any) => p.name !== st.name && (p.averagePercentage || 0) >= 85) || { name: 'سرپرستار بخش' };
-              
-              // Deep search into staff weak skills for specific educational intervention
-              const staffIntervention = deriveCorrectiveInterventionsFromSkills(weakSkills);
-              const specificAction = weakCount > 0
-                ? staffIntervention.actionsList[0] || staffIntervention.primaryAction
-                : 'تثبیت شایستگی و ایفای نقش مربی / منتور بالینی در شیفت';
-
-              staffTable += `| ${idx + 1} | **${st.name}** | ${st.title || 'کارشناس پرستاری'} | ${st.averagePercentage || 0}٪ | ${weakStatus} | ${specificAction} | **${peerMentor.name}** | ۳۰ روزه | آزمون بالینی DOPS |\n`;
-            });
-
-            staffMatrixSection = `\n---\n\n## ۳. ماتریس برنامه عملیاتی توانمندسازی پرسنل بخش (منطبق بر نام پرسنل و نمرات)\nجدول زیر بر اساس تفکیک نام دقیق پرسنل، وضعیت نمرات و تعیین مربیان بالینی معین تدوین شده است:\n\n${staffTable}\n`;
-          }
-
-          return `# برنامه جامع بهبود عملکرد و ارزیابی مهارتی بخش: ${departmentName}
-**سامانه پایش عملکرد و توانمندسازی بالینی کادر پرستاری**
-**شاخص‌های میانگین بخش:** میانگین کل: **${overallAvg}٪** (رتبه: **${overallRank}** - رنگ ریسک: **${overallRiskColor}**)
-**حیطه‌های ارزیابی:** عمومی: **${genAvg}٪** | اختصاصی: **${specAvg}٪** | ارتباطی-رفتاری: **${commAvg}٪** | کادر پایش‌شده: **${totalStaffCount || 0} نفر**
-
----
-
-## ۱. تحلیل کلان و ریشه‌ای وضعیت بخش (Executive Competency Overview)
-- **مهارت‌های عمومی:** میانگین **${genAvg}٪** (عملکردهای پایه و الزامات ایمنی کادر)
-- **مهارت‌های اختصاصی:** میانگین **${specAvg}٪** (پروسیجرهای بالینی ویژه بخش ${departmentName})
-- **مهارت‌های ارتباطی-رفتاری:** میانگین **${commAvg}٪** (آموزش به بیمار، اخلاق حرفه‌ای و تحویل شیفت)
-- **تحلیل کیفیت مراقبت:** واکاوی عمیق نمرات نشان می‌دهد که تمرکز مداخلات اصلاحی باید معطوف به ارتقای مهارت‌های با نمره ۱ و ۲ (نیازمند نظارت مستقیم و غیرمستقیم) باشد. نمرات ۳ و ۴ به عنوان نقاط قوت پایدار تلقی شده و از تکرار مجدد سنجه‌ها در گزارش پرهیز می‌گردد.
-
----
-
-## ۲. برنامه اقدامات اصلاحی و محورهای توانمندسازی (Targeted Action Plans)
-جهت جلوگیری از پراکندگی و اجرای اثربخش، اقدامات اصلاحی در محورهای جامع زیر تجمیع شده‌اند:
-
-${deptAxesTable}
-${staffMatrixSection}
----
-
-## ۴. برنامه به‌کارگیری پرسنل خبره بخش به عنوان مربیان بالینی (Preceptors)
-- **انتصاب به عنوان مربی بالینی (Preceptor):** پرسنل با امتیازات برتر (نمره ۴) در هر شیفت به عنوان مربی و ناظر بالینی پرسنل نیازمند توانمندسازی تعیین می‌شوند.
-- **مسئولیت نظارت در شیفت:** هدایت همکاران در اجرای تکنیک‌های آسپتیک، دارودهی ایمن و تحویل شیفت استاندارد با الگوی ISBAR.
-- **ارزیابی اثربخشی:** ارزیابی مجدد صلاحیت پرسنل در پایان دوره ۳۰ روزه با آزمون مشاهده مستقیم مهارت‌های پروسیجرال (DOPS) توسط سرپرستار بخش انجام خواهد شد.`;
-        }
-
-        // 3. Level 3: Individual Staff Improvement Plan (Staff Level)
-        const weakCount = (skillsSummary || []).filter((s: any) => (s.percentage || 0) < 75).length;
-
-        return `# برنامه جامع توانمندسازی و بهبود مهارتی پرسنل (سطح فردی)
-**سامانه ارزیابی مهارت‌های عملکردی و بهبود مستمر پرستاری بیمارستان**
-**نام پرسنل:** ${staffName || 'همکار محترم'} (${staffTitle || 'کارشناس بالینی'}) | **بخش:** ${departmentName}
-**میانگین شایستگی فردی:** **${overallAvg}٪** (رتبه: **${overallRank}** - وضعیت ریسک: **${overallRiskColor}**)
-
----
-
-## ۱. ارزیابی سطح شایستگی و تحلیل نمرات (Competency Assessment)
-- **تحلیل صلاحیت بالینی:** 
-  - نمره ۳ نشان‌دهنده **تسلط و استقلال کامل** در اجرای استاندارد مهارت است و ضعف محسوب نمی‌شود.
-  - نمره ۴ نشان‌دهنده **خبرگی و توانایی تدریس مهارت** به سایر همکاران است.
-  - تمرکز اصلی این برنامه منحصراً بر ارتقای سنجه‌های با **نمره ۱ و ۲ (یا زیر ۷۵٪)** است.
-- **وضعیت آماری:** تعداد **${weakCount}** سنجه در رده نیازمند تقویت و تمرین تحت نظارت شناسایی شده است.
-
----
-
-## ۲. برنامه اقدامات اصلاحی متمرکز
-۱. **رعایت کامل زنجیره آسپتیک و اصول کنترل عفونت بر بالین بیمار.**
-۲. **انطباق با گایدلاین‌های دارودهی ایمن و کنترل محاسبات دارویی.**
-۳. **تسلط بر مدیریت راه‌های هوایی و تجهیزات مراقبت ویژه بخش.**
-۴. **مستندسازی دقیق پرونده و گزارش‌نویسی پرستاری مبتنی بر استانداردها.**
-
----
-
-## ۳. برنامه آموزشی و مهارتی ۳۰ روزه (۳۰-Day Training Program)
-- **دهه اول (روز ۱ تا ۱۰ - تئوری و بازآموزی علمی):**
-  مرور راهنماهای بالینی، سنجه‌های ایمنی بیمار و پروتکل‌های مصوب بخش.
-- **دهه دوم (روز ۱۱ تا ۲۰ - شبیه‌سازی و تمرین در Skill Lab):**
-  تمرین عملی پروسیجرها روی مولاژ در مرکز مهارت‌های بالینی و اجرای پروسیجر در بخش تحت نظارت مستقیم منتور شیفت.
-- **دهه سوم (روز ۲۱ تا ۳۰ - استقلال بالینی و آزمون DOPS):**
-  اجرای مستقل پروسیجرها بر بالین بیمار و شرکت در آزمون ارزیابی مستقیم مهارت‌های بالینی (DOPS) توسط سرپرستار بخش جهت اعطای صلاحیت مستقل.
-
----
-
-## ۴. منتور بالینی، مهلت و شیوه ارزیابی مجدد
-- **مربی بالینی معین:** سرپرستار بخش ${departmentName} و منتور ارشد شیفت.
-- **مهلت اجرا:** ۳۰ روز کاری از تاریخ صدور برنامه.
-- **روش ارزیابی اثربخشی:** آزمون بالینی DOPS بر بالین بیمار واقعی.`;
-      };
-
       const structuredData = buildStructuredNursingEvaluationJson({
         hospitalName: hospitalName || 'مرکز آموزشی درمانی',
         departmentName: departmentName || 'بخش بالینی',
-        targetTitle,
-        mode: mode || 'department',
-        totalStaffCount: totalStaffCount || 0,
+        skills: skillsSummary || [],
+        staffList: finalStaffList,
         overallAvg: Number(overallAvg) || 0,
         genAvg: Number(genAvg) || 0,
         specAvg: Number(specAvg) || 0,
         commAvg: Number(commAvg) || 0,
-        overallRank,
-        overallRiskColor,
-        skillsSummary: skillsSummary || [],
-        staffList: finalStaffList,
-        staffName,
-        staffTitle
       });
 
       if (!GEMINI_API_KEY) {
@@ -739,7 +559,7 @@ ${breakdown.inspectorAnalysisPrompt}
   });
 
   // 5. Generate Individual Skill Training & Step-by-Step Guideline Education
-  router.post(['/gemini/generate-skill-training', '/api/gemini/generate-skill-training'], async (req, res) => {
+  router.post(['/gemini/generate-skill-training', '/api/gemini/generate-skill-training'], async (req: express.Request, res: express.Response) => {
     try {
       const {
         skillName,
@@ -747,12 +567,10 @@ ${breakdown.inspectorAnalysisPrompt}
         departmentName,
         staffName,
         currentScore,
-        maxPossibleScore = 4,
-        userRole
+        maxPossibleScore = 4
       } = req.body;
 
       const percentage = maxPossibleScore > 0 ? Math.round(((currentScore || 0) / maxPossibleScore) * 100) : 0;
-      const protocol = getClinicalProtocolForSkill(skillName, categoryName);
 
       // Build authentic 14-step clinical training fallback for this exact skill
       const buildFallbackTraining = () => {

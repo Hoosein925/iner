@@ -1683,7 +1683,7 @@ export function buildStructuredNursingEvaluationJson(params: {
  * Strictly formatted for clinical management, review, and display in UI.
  */
 export function formatStructuredJsonToMarkdown(data: StructuredNursingEvaluation): string {
-  const { reportInfo, summary, skills, groups, actionPlans, staffPlans, strengths, hypothesizedCauses, fieldReviewItems, qualityControl } = data;
+  const { reportInfo, summary, groups, actionPlans, staffPlans, strengths, hypothesizedCauses, fieldReviewItems, qualityControl } = data;
 
   let md = `# گزارش جامع تحلیل ارزیابی مهارت‌های عملکردی پرستاری
 **مرکز درمانی:** ${reportInfo.hospital} | **بخش:** ${reportInfo.department}
