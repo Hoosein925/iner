@@ -1,7 +1,7 @@
 import React from 'react';
 
 export const PaperClipIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
-  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.122 2.122l7.81-7.81" />
-  </svg>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
+        <path fillRule="evenodd" d="M3 4.75A1.75 1.75 0 0 1 4.75 3h11.284a1.75 1.75 0 0 1 1.237.513l4.25 4.25a1.75 1.75 0 0 1 .513 1.236V19.25A1.75 1.75 0 0 1 20.25 21H4.75A1.75 1.75 0 0 1 3 19.25V4.75Zm13.5 0V7.5a.75.75 0 0 0 .75.75h2.75l-3.5-3.5Z" clipRule="evenodd" />
+    </svg>
 );
