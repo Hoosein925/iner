@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Hospital, UserRole } from '../types';
 import Modal from './Modal';
+import ConfirmationModal from './ConfirmationModal';
 import { PlusIcon } from './icons/PlusIcon';
 import { TrashIcon } from './icons/TrashIcon';
 import { HomeIcon } from './icons/HomeIcon';
@@ -31,6 +32,7 @@ const HospitalList: React.FC<HospitalListProps> = ({
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingHospital, setEditingHospital] = useState<Hospital | null>(null);
+  const [hospitalToDelete, setHospitalToDelete] = useState<Hospital | null>(null);
   const [hospitalName, setHospitalName] = useState('');
   const [province, setProvince] = useState('');
   const [city, setCity] = useState('');
@@ -163,9 +165,7 @@ const HospitalList: React.FC<HospitalListProps> = ({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    if(window.confirm(`آیا از حذف بیمارستان "${h.name}" مطمئن هستید؟`)) {
-                      onDeleteHospital(h.id);
-                    }
+                    setHospitalToDelete(h);
                   }}
                   className="p-2 text-slate-400 hover:text-red-500 bg-slate-100 dark:bg-slate-700 rounded-full"
                   aria-label="Delete Hospital"
@@ -239,6 +239,21 @@ const HospitalList: React.FC<HospitalListProps> = ({
           </div>
         </div>
       </Modal>
+
+      <ConfirmationModal
+        isOpen={!!hospitalToDelete}
+        onClose={() => setHospitalToDelete(null)}
+        onConfirm={() => {
+          if (hospitalToDelete) {
+            onDeleteHospital(hospitalToDelete.id);
+            setHospitalToDelete(null);
+          }
+        }}
+        title="تایید حذف بیمارستان"
+        message={`آیا از حذف بیمارستان "${hospitalToDelete?.name}" مطمئن هستید؟ با انجام این عملیات کلیه بخش‌ها و پرسنل این بیمارستان حذف خواهند شد.`}
+        confirmButtonText="حذف بیمارستان"
+        cancelButtonText="انصراف"
+      />
     </div>
   );
 };

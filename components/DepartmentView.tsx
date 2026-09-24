@@ -1,8 +1,10 @@
 
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Department, StaffMember, SkillCategory, UserRole, NewsBanner, MonthlyWorkLog } from '../types';
 import Modal from './Modal';
+import ConfirmationModal from './ConfirmationModal';
 import { PlusIcon } from './icons/PlusIcon';
 import FileUploader from './FileUploader';
 import { parseComprehensiveExcel } from '../services/excelParser';
@@ -13,6 +15,11 @@ import NewsCarousel from './NewsCarousel';
 import { BookOpenIcon } from './icons/BookOpenIcon';
 import { SaveIcon } from './icons/SaveIcon';
 import { UploadIcon } from './icons/UploadIcon';
+import { ClipboardDocumentListIcon } from './icons/ClipboardDocumentListIcon';
+import { AiIcon } from './icons/AiIcon';
+import { BackIcon } from './icons/BackIcon';
+import PeriodicPlanModal from './PeriodicPlanModal';
+import { generatePeriodicPlanWithAI } from '../services/geminiService';
 
 
 interface DepartmentViewProps {
@@ -28,6 +35,7 @@ interface DepartmentViewProps {
   onManageExams: () => void;
   onManageTraining: () => void;
   onManagePatientEducation: () => void;
+  onManageCorrectiveActions?: () => void;
   onAddOrUpdateWorkLog: (departmentId: string, staffId: string, workLog: MonthlyWorkLog) => void;
   onReplaceDepartmentData: (hospitalId: string, departmentData: Department) => void;
   userRole: UserRole;
@@ -57,6 +65,7 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
   onManageExams,
   onManageTraining,
   onManagePatientEducation,
+  onManageCorrectiveActions,
   onAddOrUpdateWorkLog,
   onReplaceDepartmentData,
   userRole,
@@ -65,6 +74,7 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
+  const [staffToDelete, setStaffToDelete] = useState<StaffMember | null>(null);
 
   // Form state for staff modal
   const [staffName, setStaffName] = useState('');
@@ -84,6 +94,189 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
   const [leaveTaken, setLeaveTaken] = useState('');
   const [annualLeave, setAnnualLeave] = useState('');
   const [workExperience, setWorkExperience] = useState('');
+
+  // AI Department Periodic Plan State (1, 3, 6, 12 months)
+  const [isPeriodicPlanModalOpen, setIsPeriodicPlanModalOpen] = useState(false);
+  const [periodicPlanContent, setPeriodicPlanContent] = useState<string | null>(null);
+  const [isPeriodicPlanLoading, setIsPeriodicPlanLoading] = useState(false);
+  const [deptOverallAvg, setDeptOverallAvg] = useState(80);
+  const [deptGenAvg, setDeptGenAvg] = useState(80);
+  const [deptSpecAvg, setDeptSpecAvg] = useState(80);
+  const [deptCommAvg, setDeptCommAvg] = useState(80);
+
+  const handleOpenDepartmentPeriodicPlan = async () => {
+    setIsPeriodicPlanModalOpen(true);
+    setIsPeriodicPlanLoading(true);
+    setPeriodicPlanContent(null);
+
+    try {
+      let totalAssessedStaff = 0;
+      let totalItems = 0;
+      let totalScoreSum = 0;
+      let genItems = 0;
+      let genScoreSum = 0;
+      let specItems = 0;
+      let specScoreSum = 0;
+      let commItems = 0;
+      let commScoreSum = 0;
+
+      const skillMap = new Map<string, { categoryName: string; totalScore: number; count: number }>();
+
+      (department.staff || []).forEach(staff => {
+        const staffYearAssessments = (staff.assessments || []).filter(a => a.year === activeYear);
+        if (staffYearAssessments.length > 0) {
+          totalAssessedStaff++;
+          const latestAss = staffYearAssessments[staffYearAssessments.length - 1];
+          const maxScore = latestAss.maxScore ?? 4;
+
+          (latestAss.skillCategories || []).forEach(cat => {
+            const isGeneral = cat.name.includes('عمومی');
+            const isSpecial = cat.name.includes('تخصصی') || cat.name.includes('ویژه');
+            const isComm = cat.name.includes('ارتباط') || cat.name.includes('حقوق');
+            const catShort = isGeneral ? 'مهارت‌های عمومی' : isComm ? 'مهارت‌های ارتباطی' : 'مهارت‌های تخصصی';
+
+            (cat.items || []).forEach((item, itemIdx) => {
+              const score = typeof item.score === 'number' ? item.score : 0;
+              const normalizedScore = maxScore > 0 ? (score / maxScore) * 4 : 0;
+              const radif = item.radif || (itemIdx + 1);
+              const refText = `مهارت شماره ${radif} از ${catShort}`;
+              totalItems++;
+              totalScoreSum += normalizedScore;
+
+              if (isGeneral) {
+                genItems++;
+                genScoreSum += normalizedScore;
+              } else if (isSpecial) {
+                specItems++;
+                specScoreSum += normalizedScore;
+              } else if (isComm) {
+                commItems++;
+                commScoreSum += normalizedScore;
+              } else {
+                specItems++;
+                specScoreSum += normalizedScore;
+              }
+
+              const existing = skillMap.get(item.description) || {
+                categoryName: catShort,
+                totalScore: 0,
+                count: 0,
+                radif,
+                referenceText: refText
+              };
+              existing.totalScore += normalizedScore;
+              existing.count += 1;
+              skillMap.set(item.description, existing);
+            });
+          });
+        }
+      });
+
+      const maxPossibleScore = 4;
+      const overallAvg = totalItems > 0 ? Math.round((totalScoreSum / (totalItems * maxPossibleScore)) * 100) : 80;
+      const genAvg = genItems > 0 ? Math.round((genScoreSum / (genItems * maxPossibleScore)) * 100) : overallAvg;
+      const specAvg = specItems > 0 ? Math.round((specScoreSum / (specItems * maxPossibleScore)) * 100) : overallAvg;
+      const commAvg = commItems > 0 ? Math.round((commScoreSum / (commItems * maxPossibleScore)) * 100) : overallAvg;
+
+      const skillsSummary: any[] = [];
+      const weakSkills: any[] = [];
+
+      skillMap.forEach((val, desc) => {
+        const avgScore = val.count > 0 ? val.totalScore / val.count : 0;
+        const percentage = Math.round((avgScore / maxPossibleScore) * 100);
+        skillsSummary.push({
+          skillName: desc,
+          categoryName: val.categoryName,
+          radif: val.radif,
+          referenceText: val.referenceText,
+          score: parseFloat(avgScore.toFixed(1)),
+          percentage,
+        });
+
+        if (percentage < 75) {
+          weakSkills.push({
+            skillName: desc,
+            categoryName: val.categoryName,
+            radif: val.radif,
+            referenceText: val.referenceText,
+            score: parseFloat(avgScore.toFixed(1)),
+          });
+        }
+      });
+
+      setDeptOverallAvg(overallAvg);
+      setDeptGenAvg(genAvg);
+      setDeptSpecAvg(specAvg);
+      setDeptCommAvg(commAvg);
+
+      // Extract detailed staff profile with skill scores for the operational matrix
+      const staffDetails = (department.staff || []).map(staff => {
+        const staffYearAssessments = (staff.assessments || []).filter(a => a.year === activeYear);
+        const latestAss = staffYearAssessments.length > 0 ? staffYearAssessments[staffYearAssessments.length - 1] : null;
+        const maxScore = latestAss?.maxScore ?? 4;
+
+        let stTotal = 0;
+        let stCount = 0;
+        const stWeak: { skillName: string; radif: number; categoryName: string; score: number; referenceText: string }[] = [];
+        const stExpert: { skillName: string; radif: number; categoryName: string; score: number; referenceText: string }[] = [];
+
+        if (latestAss) {
+          (latestAss.skillCategories || []).forEach(cat => {
+            const catShort = cat.name.includes('عمومی')
+              ? 'مهارت‌های عمومی'
+              : cat.name.includes('ارتباط') || cat.name.includes('حقوق') || cat.name.includes('اخلاق')
+              ? 'مهارت‌های ارتباطی'
+              : 'مهارت‌های تخصصی';
+
+            (cat.items || []).forEach((item, itemIdx) => {
+              const sc = typeof item.score === 'number' ? item.score : 0;
+              const norm = maxScore > 0 ? (sc / maxScore) * 4 : 0;
+              const radif = item.radif || (itemIdx + 1);
+              const refText = `مهارت شماره ${radif} از ${catShort}`;
+              stTotal += norm;
+              stCount += 1;
+              if (sc < 3) {
+                stWeak.push({ skillName: item.description, radif, categoryName: catShort, score: sc, referenceText: refText });
+              } else if (sc >= 4) {
+                stExpert.push({ skillName: item.description, radif, categoryName: catShort, score: sc, referenceText: refText });
+              }
+            });
+          });
+        }
+
+        const avgPct = stCount > 0 ? Math.round((stTotal / (stCount * 4)) * 100) : 0;
+        return {
+          id: staff.id,
+          name: staff.name,
+          title: staff.title || 'کارشناس پرستاری',
+          averagePercentage: avgPct,
+          weakSkills: stWeak,
+          expertSkills: stExpert,
+        };
+      });
+
+      const plan = await generatePeriodicPlanWithAI({
+        mode: 'department',
+        departmentName: department.name,
+        overallAvg,
+        genAvg,
+        specAvg,
+        commAvg,
+        totalStaffCount: department.staff.length,
+        skillsSummary,
+        weakSkills,
+        staffDetails,
+        activeYear,
+      });
+
+      setPeriodicPlanContent(plan);
+    } catch (err) {
+      console.error('Error generating department periodic plan:', err);
+      setPeriodicPlanContent('خطا در تدوین برنامه جامع بخش با هوش مصنوعی.');
+    } finally {
+      setIsPeriodicPlanLoading(false);
+    }
+  };
 
   const resetForm = () => {
     setStaffName('');
@@ -308,9 +501,9 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
           <h2 className="text-xl font-bold mb-4">روند میانگین امتیازات مهارت بخش در سال {activeYear}</h2>
           <div className="bg-slate-100 dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-700">
             <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={chartInfo.data} margin={{ top: 5, right: 20, left: -20, bottom: 5 }}>
+                <LineChart data={chartInfo.data} margin={{ top: 5, right: 20, left: -20, bottom: 30 }}>
                 <CartesianGrid strokeDasharray="5 5" stroke="rgba(100, 116, 139, 0.3)" />
-                <XAxis dataKey="name" tick={{ fill: 'currentColor', fontSize: 12 }} className="text-slate-500 dark:text-slate-400" padding={{ left: 30 }} />
+                <XAxis dataKey="name" tick={{ fill: 'currentColor', fontSize: 10 }} className="text-slate-500 dark:text-slate-400" angle={-45} textAnchor="end" height={40} interval={0} />
                 <YAxis unit="%" domain={[0, 100]} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-slate-500 dark:text-slate-400" />
                 <Tooltip
                     cursor={{ stroke: '#94a3b8', strokeWidth: 1, strokeDasharray: '5 5' }}
@@ -342,9 +535,9 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
           <h2 className="text-xl font-bold mb-4">روند پیشرفت فردی پرسنل در سال {activeYear}</h2>
           <div className="bg-slate-100 dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-700">
             <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={staffProgressChartData} margin={{ top: 5, right: 20, left: -20, bottom: 5 }}>
+                <LineChart data={staffProgressChartData} margin={{ top: 5, right: 20, left: -20, bottom: 30 }}>
                 <CartesianGrid strokeDasharray="5 5" stroke="rgba(100, 116, 139, 0.3)" />
-                <XAxis dataKey="name" tick={{ fill: 'currentColor', fontSize: 12 }} className="text-slate-500 dark:text-slate-400" padding={{ left: 30 }} />
+                <XAxis dataKey="name" tick={{ fill: 'currentColor', fontSize: 10 }} className="text-slate-500 dark:text-slate-400" angle={-45} textAnchor="end" height={40} interval={0} />
                 <YAxis unit="%" domain={[0, 100]} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-slate-500 dark:text-slate-400" />
                 <Tooltip
                     cursor={{ stroke: '#94a3b8', strokeWidth: 1, strokeDasharray: '5 5' }}
@@ -383,6 +576,39 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
             accept=".xlsx"
             title="آپلود فایل اکسل جامع بخش"
         />
+      </div>
+
+      {/* AI Strategic Assessment & Periodic Plan Banner for Supervisors/Managers */}
+      <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-teal-700 rounded-2xl shadow-xl p-5 sm:p-6 mb-8 text-white flex flex-col md:flex-row items-start md:items-center justify-between gap-5 border border-white/10">
+        <div className="flex items-center gap-4">
+          <div className="p-3.5 bg-white/15 backdrop-blur-md rounded-2xl border border-white/20 shadow-inner">
+            <AiIcon className="w-9 h-9 text-amber-300 animate-pulse" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-black px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-900">
+                هوش مصنوعی ارزیابی و برنامه راهبردی
+              </span>
+              <span className="text-xs text-blue-100 opacity-90">
+                منطبق بر اسامی پرسنل، نمرات مهارت‌ها و ماتریس توانمندسازی
+              </span>
+            </div>
+            <h3 className="text-lg sm:text-xl font-black mt-1">
+              شرح وضعیت کلیه پرسنل بخش و برنامه ۱، ۳، ۶ و ۱۲ ماهه
+            </h3>
+            <p className="text-xs sm:text-sm text-blue-100 opacity-90 mt-1 max-w-2xl leading-relaxed">
+              تحلیل عمیق مهارت‌های عمومی، تخصصی و ارتباطی کلیه پرسنل، شناسایی خلأهای بالینی و ارائه جدول زمان‌بندی مدون با قابلیت خروجی مستقیم فایل رسمی Word (.docx)
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={handleOpenDepartmentPeriodicPlan}
+          className="px-5 py-3 bg-white text-indigo-900 hover:bg-amber-300 hover:text-slate-900 rounded-xl font-black text-sm transition-all shadow-lg flex items-center gap-2.5 shrink-0 self-stretch md:self-auto justify-center"
+        >
+          <AiIcon className="w-5 h-5 text-indigo-600" />
+          <span>تولید برنامه و دریافت فایل ورد</span>
+        </button>
       </div>
 
       <div className="flex justify-between items-center mb-6">
@@ -433,9 +659,7 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
-                                if(window.confirm(`آیا از حذف "${staff.name}" مطمئن هستید؟`)) {
-                                onDeleteStaff(department.id, staff.id);
-                                }
+                                setStaffToDelete(staff);
                             }}
                             className="px-3 py-1 text-xs font-semibold text-white bg-red-500 rounded-md shadow-sm hover:bg-red-600 transition-transform transform hover:scale-105"
                             title="حذف پرسنل"
@@ -591,9 +815,38 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
   return (
     <div className="p-4 sm:p-6 lg:p-8">
       <div className="flex flex-wrap justify-between items-center mb-6 gap-4">
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100">{department.name} - <span className="text-slate-500 text-2xl">سال {activeYear}</span></h1>
+        <div className="flex items-center gap-3">
+          {userRole !== UserRole.Manager && (
+            <button
+              onClick={onBack}
+              className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg shadow-sm hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              title="بازگشت به لیست بخش‌ها"
+            >
+              <BackIcon className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+              <span>بازگشت به لیست بخش‌ها</span>
+            </button>
+          )}
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100">{department.name} - <span className="text-slate-500 text-xl sm:text-2xl">سال {activeYear}</span></h1>
+        </div>
         {(userRole === UserRole.Admin || userRole === UserRole.Supervisor || userRole === UserRole.Manager) && (
             <div className="flex items-center gap-2 flex-wrap justify-end">
+                <button
+                    onClick={handleOpenDepartmentPeriodicPlan}
+                    className={`${baseButtonClass} bg-gradient-to-r from-blue-600 via-indigo-600 to-teal-600 hover:from-blue-700 hover:to-teal-700 focus:ring-indigo-500 shadow-lg border border-white/20`}
+                    title="تحلیل شرح وضعیت کلیه پرسنل و برنامه ۱، ۳، ۶ و ۱۲ ماهه با امکان دانلود فایل Word"
+                >
+                    <AiIcon className="w-5 h-5 text-amber-300 animate-pulse" />
+                    <span>برنامه ۱، ۳، ۶ و ۱۲ ماهه بخش (Word)</span>
+                </button>
+                {onManageCorrectiveActions && (
+                  <button
+                    onClick={onManageCorrectiveActions}
+                    className={`${baseButtonClass} bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-500`}
+                  >
+                    <ClipboardDocumentListIcon className="w-5 h-5" />
+                    اقدامات اصلاحی بخش
+                  </button>
+                )}
                 <button
                     onClick={onManagePatientEducation}
                     className={`${baseButtonClass} bg-orange-500 hover:bg-orange-600 focus:ring-orange-400`}
@@ -633,6 +886,40 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
       )}
 
       {renderStaffListView()}
+
+      {/* AI Department Periodic Plan Modal with Word Export */}
+      <PeriodicPlanModal
+        isOpen={isPeriodicPlanModalOpen}
+        onClose={() => setIsPeriodicPlanModalOpen(false)}
+        title={`برنامه راهبردی و شرح وضعیت مهارت‌های کلیه پرسنل بخش ${department.name}`}
+        targetName={`کلیه پرسنل بخش ${department.name}`}
+        departmentName={department.name}
+        roleDescription={`سوپروایزر آموزشی / مسئول بخش (تحلیل جامع کلیه پرسنل)`}
+        content={periodicPlanContent}
+        isLoading={isPeriodicPlanLoading}
+        onRegenerate={handleOpenDepartmentPeriodicPlan}
+        overallAvg={deptOverallAvg}
+        genAvg={deptGenAvg}
+        specAvg={deptSpecAvg}
+        commAvg={deptCommAvg}
+        totalStaffCount={department.staff?.length || 0}
+        activeYear={activeYear}
+      />
+
+      <ConfirmationModal
+        isOpen={!!staffToDelete}
+        onClose={() => setStaffToDelete(null)}
+        onConfirm={() => {
+          if (staffToDelete) {
+            onDeleteStaff(department.id, staffToDelete.id);
+            setStaffToDelete(null);
+          }
+        }}
+        title="تایید حذف پرسنل"
+        message={`آیا از حذف "${staffToDelete?.name}" (${staffToDelete?.title || 'پرسنل'}) مطمئن هستید؟ با انجام این عملیات، تمامی ارزیابی‌ها، چک‌لیست‌ها و سوابق ثبت‌شده برای این فرد حذف خواهند شد.`}
+        confirmButtonText="حذف پرسنل"
+        cancelButtonText="انصراف"
+      />
     </div>
   );
 };

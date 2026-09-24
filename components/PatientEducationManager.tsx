@@ -142,7 +142,17 @@ const PatientEducationManager: React.FC<PatientEducationManagerProps> = ({ depar
     return (
         <>
             <div className="flex flex-wrap justify-between items-center mb-6 gap-4">
-                <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100">آموزش به بیمار: <span className="text-orange-500">{department.name}</span></h1>
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={onBack}
+                        className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg shadow-sm hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                        title="بازگشت به بخش"
+                    >
+                        <BackIcon className="w-5 h-5 text-orange-600 dark:text-orange-400" />
+                        <span>بازگشت به بخش</span>
+                    </button>
+                    <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100">آموزش به بیمار: <span className="text-orange-500">{department.name}</span></h1>
+                </div>
                 <div className="flex items-center gap-2 flex-wrap justify-end">
                     <button 
                         onClick={() => setIsContentModalOpen(true)}

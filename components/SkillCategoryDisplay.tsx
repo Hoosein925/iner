@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { SkillCategory, SkillItem } from '../types';
 import { TrashIcon } from './icons/TrashIcon';
 import { PlusIcon } from './icons/PlusIcon';
+import { AiIcon } from './icons/AiIcon';
 
 interface SkillCategoryDisplayProps {
   category: SkillCategory;
@@ -9,17 +10,27 @@ interface SkillCategoryDisplayProps {
   onCategoryChange?: (updatedCategory: SkillCategory) => void;
   onDeleteCategory?: () => void;
   maxPossibleScore?: number;
+  onGenerateSkillTraining?: (item: SkillItem, categoryName: string) => void;
 }
 
 const MIN_SCORE_PERCENTAGE = 60;
 
-const SkillCategoryDisplay: React.FC<SkillCategoryDisplayProps> = ({ category, isEditing = false, onCategoryChange, onDeleteCategory, maxPossibleScore = 4 }) => {
+const SkillCategoryDisplay: React.FC<SkillCategoryDisplayProps> = ({ 
+  category, 
+  isEditing = false, 
+  onCategoryChange, 
+  onDeleteCategory, 
+  maxPossibleScore = 4,
+  onGenerateSkillTraining
+}) => {
 
   const { totalScore, maxScore, percentage } = useMemo(() => {
     if (!category || !category.items) return { totalScore: 0, maxScore: 0, percentage: 0 };
-    const total = category.items.reduce((sum, item) => sum + item.score, 0);
-    const max = category.items.length * maxPossibleScore;
-    const perc = max > 0 ? (total / max) * 100 : 0;
+    // Filter items to ensure valid score values (0 to 5) are used in calculation
+    const validItems = category.items.filter(item => typeof item.score === 'number' && item.score >= 0 && item.score <= (maxPossibleScore || 5));
+    const total = validItems.reduce((sum, item) => sum + item.score, 0);
+    const max = validItems.length * (maxPossibleScore || 4);
+    const perc = max > 0 ? Math.min(100, (total / max) * 100) : 0;
     return { totalScore: total, maxScore: max, percentage: perc };
   }, [category, maxPossibleScore]);
 
@@ -145,11 +156,18 @@ const SkillCategoryDisplay: React.FC<SkillCategoryDisplayProps> = ({ category, i
   const scoreTextColor = isQualified ? (percentage >= 80 ? 'text-teal-600 dark:text-teal-400' : 'text-amber-600 dark:text-amber-400') : 'text-rose-600 dark:text-rose-400';
 
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-6 mb-6">
-      <div className="flex justify-between items-start mb-4">
-        <h3 className="text-2xl font-bold text-slate-800 dark:text-slate-100">{category.name}</h3>
+    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-6 mb-6 overflow-hidden">
+      <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
+        <div className="flex items-center gap-2.5">
+          <h3 className="text-2xl font-bold text-slate-800 dark:text-slate-100">{category.name}</h3>
+          {category?.items?.length > 0 && (
+            <span className="text-xs font-bold px-2.5 py-1 bg-slate-100 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300 rounded-full border border-slate-200 dark:border-slate-600">
+              {category.items.length} مهارت
+            </span>
+          )}
+        </div>
         {category?.items?.length > 0 && (
-             <span className={`px-3 py-1 text-sm font-semibold rounded-full ${isQualified ? 'bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200' : 'bg-rose-100 text-rose-800 dark:bg-rose-900 dark:text-rose-200'}`}>
+             <span className={`px-3 py-1 text-sm font-semibold rounded-full shrink-0 ${isQualified ? 'bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200' : 'bg-rose-100 text-rose-800 dark:bg-rose-900 dark:text-rose-200'}`}>
                 {isQualified ? 'احراز صلاحیت' : 'عدم احراز صلاحیت'}
             </span>
         )}
@@ -162,10 +180,10 @@ const SkillCategoryDisplay: React.FC<SkillCategoryDisplayProps> = ({ category, i
                     <span className="text-sm font-medium text-slate-600 dark:text-slate-300">امتیاز کل: {totalScore.toFixed(1)} / {maxScore}</span>
                     <span className={`text-lg font-bold ${scoreTextColor}`}>{percentage.toFixed(1)}%</span>
                 </div>
-                <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-4">
+                <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-4 overflow-hidden">
                 <div
                     className={`h-4 rounded-full transition-all duration-500 ${scoreColor}`}
-                    style={{ width: `${percentage}%` }}
+                    style={{ width: `${Math.min(100, Math.max(0, percentage))}%` }}
                 ></div>
                 </div>
             </div>
@@ -175,14 +193,25 @@ const SkillCategoryDisplay: React.FC<SkillCategoryDisplayProps> = ({ category, i
                 <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-700 dark:text-slate-300 sticky top-0">
                     <tr>
                     <th scope="col" className="px-6 py-3">شرح مهارت</th>
-                    <th scope="col" className="px-6 py-3 w-24 text-center">نمره (از {maxPossibleScore})</th>
+                    <th scope="col" className="px-6 py-3 w-28 text-center">نمره (از {maxPossibleScore})</th>
+                    <th scope="col" className="px-4 py-3 w-48 text-center">برنامه و آموزش هوشمند</th>
                     </tr>
                 </thead>
                 <tbody>
                     {category.items.map((item, index) => (
-                    <tr key={index} className="border-b dark:border-slate-700 odd:bg-white odd:dark:bg-slate-800 even:bg-slate-50 even:dark:bg-slate-700/50">
-                        <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">{item.description}</td>
-                        <td className="px-6 py-4 text-center">{item.score}</td>
+                    <tr key={index} className="border-b dark:border-slate-700 odd:bg-white odd:dark:bg-slate-800 even:bg-slate-50 even:dark:bg-slate-700/50 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/20 transition-colors">
+                        <td className="px-6 py-4 font-medium text-slate-900 dark:text-white leading-relaxed">{item.description}</td>
+                        <td className="px-6 py-4 text-center font-bold text-slate-800 dark:text-slate-200">{item.score}</td>
+                        <td className="px-4 py-3 text-center">
+                            <button
+                                onClick={() => onGenerateSkillTraining?.(item, category.name)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-bold shadow-sm hover:shadow transition-all whitespace-nowrap transform hover:-translate-y-0.5"
+                                title="ایجاد برنامه آموزشی و آموزش کامل طبق گایدلاین‌ها با هوش مصنوعی"
+                            >
+                                <AiIcon className="w-3.5 h-3.5 text-amber-300" />
+                                <span>برنامه و آموزش AI</span>
+                            </button>
+                        </td>
                     </tr>
                     ))}
                 </tbody>

@@ -1,10 +1,12 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { Department, StaffMember, SkillCategory, Assessment, NamedChecklistTemplate, ExamTemplate, Question, QuestionType, ExamSubmission, ExamAnswer, UserRole, MonthlyTraining, TrainingMaterial, NewsBanner, MonthlyNeedsAssessment } from '../types';
-import { generateImprovementPlan } from '../services/geminiService';
+import { Department, StaffMember, SkillCategory, Assessment, NamedChecklistTemplate, ExamTemplate, Question, QuestionType, ExamSubmission, ExamAnswer, UserRole, MonthlyTraining, TrainingMaterial, NewsBanner, MonthlyNeedsAssessment, SkillItem } from '../types';
+import { generateImprovementPlan, generatePeriodicPlanWithAI } from '../services/geminiService';
 import SkillCategoryDisplay from './SkillCategoryDisplay';
 import SuggestionModal from './SuggestionModal';
+import PeriodicPlanModal from './PeriodicPlanModal';
+import SkillAiTrainingModal from './SkillAiTrainingModal';
 import Modal from './Modal';
 import { BackIcon } from './icons/BackIcon';
 import { AiIcon } from './icons/AiIcon';
@@ -154,17 +156,48 @@ const StaffMemberView: React.FC<StaffMemberViewProps> = ({
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
+  // AI 1, 3, 6, 12 Month Periodic Plan State
+  const [isPeriodicPlanModalOpen, setIsPeriodicPlanModalOpen] = useState(false);
+  const [periodicPlanContent, setPeriodicPlanContent] = useState<string | null>(null);
+  const [isPeriodicPlanLoading, setIsPeriodicPlanLoading] = useState(false);
+
+  // AI Specific Skill Training State
+  const [skillTrainingModalState, setSkillTrainingModalState] = useState<{
+    isOpen: boolean;
+    skillName: string;
+    categoryName: string;
+    currentScore?: number;
+    maxScore?: number;
+  }>({
+    isOpen: false,
+    skillName: '',
+    categoryName: '',
+  });
+
   const assessmentsByMonth = useMemo(() => {
     const map = new Map<string, Assessment>();
     (staffMember.assessments || [])
       .filter(a => a.year === activeYear)
-      .forEach(a => map.set(a.month, a));
+      .forEach(a => {
+        const sanitizedCategories = (a.skillCategories || []).map(cat => ({
+          ...cat,
+          items: (cat.items || []).filter(item => typeof item.score === 'number' && item.score >= 0 && item.score <= (a.maxScore && a.maxScore > 5 ? a.maxScore : 5))
+        }));
+        const totalItemsCount = sanitizedCategories.reduce((sum, cat) => sum + (cat.items ? cat.items.length : 0), 0);
+        const hasValidScores = totalItemsCount >= 3;
+        if (hasValidScores) {
+          map.set(a.month, {
+            ...a,
+            skillCategories: sanitizedCategories
+          });
+        }
+      });
     return map;
   }, [staffMember.assessments, activeYear]);
 
   const hasAnyAssessmentThisYear = useMemo(() => {
-    return (staffMember.assessments || []).some(a => a.year === activeYear && a.skillCategories.some(c => c.items.length > 0));
-  }, [staffMember.assessments, activeYear]);
+    return Array.from(assessmentsByMonth.values()).length > 0;
+  }, [assessmentsByMonth]);
 
   const needsAssessmentTopicsForMonth = useMemo(() => {
     if (!selectedMonth) return [];
@@ -197,39 +230,163 @@ const StaffMemberView: React.FC<StaffMemberViewProps> = ({
       setCurrentScreen('assessment_menu');
   };
 
-  const handleGetComprehensiveSuggestions = () => {
-    if (!selectedMonth) return;
-    const assessment = assessmentsByMonth.get(selectedMonth);
-    if (!assessment) return;
-    const maxScore = assessment.maxScore ?? 4;
+  const handleGetComprehensiveSuggestions = async () => {
+    const assessment = selectedMonth ? assessmentsByMonth.get(selectedMonth) : undefined;
+    const maxScore = assessment?.maxScore ?? 4;
 
-    const weakSkillsByCateogry = assessment.skillCategories
+    const weakSkillsByCategory = assessment ? assessment.skillCategories
       .map(cat => ({
         categoryName: cat.name,
-        skills: cat.items.filter(item => item.score < maxScore)
+        skills: cat.items
+          .map((item, idx) => ({
+            ...item,
+            radif: item.radif || (idx + 1)
+          }))
+          .filter(item => item.score < maxScore)
       }))
-      .filter(cat => cat.skills.length > 0);
-    
-    if (weakSkillsByCateogry.length === 0) {
-        alert("این پرسنل در تمام مهارت‌ها نمره کامل کسب کرده است.");
-        return;
-    }
+      .filter(cat => cat.skills.length > 0) : [];
 
     setIsSuggestionModalOpen(true);
     setIsSuggestionLoading(true);
     setSuggestionContent(null);
 
-    setTimeout(() => {
-        const result = generateImprovementPlan(
-          staffMember, 
-          weakSkillsByCateogry,
-          assessment.supervisorMessage,
-          assessment.managerMessage
-        );
-        setSuggestionContent(result);
-        setIsSuggestionLoading(false);
-    }, 50);
-};
+    try {
+      const result = await generateImprovementPlan(
+        staffMember, 
+        weakSkillsByCategory,
+        assessment?.supervisorMessage,
+        assessment?.managerMessage
+      );
+      setSuggestionContent(result);
+    } catch (err) {
+      console.error("Error generating suggestion:", err);
+      setSuggestionContent("خطا در تولید برنامه بهبود با هوش مصنوعی.");
+    } finally {
+      setIsSuggestionLoading(false);
+    }
+  };
+
+  const handleOpenStaffPeriodicPlan = async () => {
+    setIsPeriodicPlanModalOpen(true);
+    setIsPeriodicPlanLoading(true);
+    setPeriodicPlanContent(null);
+
+    try {
+      let targetAssessment = selectedMonth ? assessmentsByMonth.get(selectedMonth) : null;
+      if (!targetAssessment) {
+        for (let i = PERSIAN_MONTHS.length - 1; i >= 0; i--) {
+          const ass = assessmentsByMonth.get(PERSIAN_MONTHS[i]);
+          if (ass) {
+            targetAssessment = ass;
+            break;
+          }
+        }
+      }
+
+      const maxPossibleScore = targetAssessment?.maxScore ?? 4;
+      let totalItems = 0;
+      let totalScoreSum = 0;
+      let genItems = 0;
+      let genScoreSum = 0;
+      let specItems = 0;
+      let specScoreSum = 0;
+      let commItems = 0;
+      let commScoreSum = 0;
+
+      const skillsSummary: any[] = [];
+      const weakSkills: any[] = [];
+
+      if (targetAssessment && targetAssessment.skillCategories) {
+        targetAssessment.skillCategories.forEach(cat => {
+          const isGeneral = cat.name.includes('عمومی');
+          const isSpecial = cat.name.includes('تخصصی') || cat.name.includes('ویژه');
+          const isComm = cat.name.includes('ارتباط') || cat.name.includes('حقوق');
+          const catShort = isGeneral ? 'مهارت‌های عمومی' : isComm ? 'مهارت‌های ارتباطی' : 'مهارت‌های تخصصی';
+
+          (cat.items || []).forEach((item, itemIdx) => {
+            const score = typeof item.score === 'number' ? item.score : 0;
+            const radif = item.radif || (itemIdx + 1);
+            const refText = `مهارت شماره ${radif} از ${catShort}`;
+            totalItems++;
+            totalScoreSum += score;
+
+            if (isGeneral) {
+              genItems++;
+              genScoreSum += score;
+            } else if (isSpecial) {
+              specItems++;
+              specScoreSum += score;
+            } else if (isComm) {
+              commItems++;
+              commScoreSum += score;
+            } else {
+              specItems++;
+              specScoreSum += score;
+            }
+
+            const itemPercentage = maxPossibleScore > 0 ? (score / maxPossibleScore) * 100 : 0;
+            skillsSummary.push({
+              skillName: item.description,
+              categoryName: catShort,
+              radif,
+              referenceText: refText,
+              score,
+              percentage: Math.round(itemPercentage),
+            });
+
+            if (score < maxPossibleScore * 0.75) {
+              weakSkills.push({
+                skillName: item.description,
+                categoryName: catShort,
+                radif,
+                referenceText: refText,
+                score,
+              });
+            }
+          });
+        });
+      }
+
+      const overallAvg = totalItems > 0 ? Math.round((totalScoreSum / (totalItems * maxPossibleScore)) * 100) : 80;
+      const genAvg = genItems > 0 ? Math.round((genScoreSum / (genItems * maxPossibleScore)) * 100) : overallAvg;
+      const specAvg = specItems > 0 ? Math.round((specScoreSum / (specItems * maxPossibleScore)) * 100) : overallAvg;
+      const commAvg = commItems > 0 ? Math.round((commScoreSum / (commItems * maxPossibleScore)) * 100) : overallAvg;
+
+      const plan = await generatePeriodicPlanWithAI({
+        mode: 'staff',
+        departmentName: department.name,
+        staffName: staffMember.name,
+        staffTitle: staffMember.title,
+        overallAvg,
+        genAvg,
+        specAvg,
+        commAvg,
+        totalStaffCount: 1,
+        skillsSummary,
+        weakSkills,
+        supervisorMessage: targetAssessment?.supervisorMessage,
+        managerMessage: targetAssessment?.managerMessage,
+      });
+
+      setPeriodicPlanContent(plan);
+    } catch (err) {
+      console.error('Error generating staff periodic plan:', err);
+      setPeriodicPlanContent('خطا در تدوین برنامه جامع با هوش مصنوعی.');
+    } finally {
+      setIsPeriodicPlanLoading(false);
+    }
+  };
+
+  const handleGenerateSkillTraining = (item: SkillItem, categoryName: string) => {
+    const currentAssessment = selectedMonth ? assessmentsByMonth.get(selectedMonth) : null;
+    setSkillTrainingModalState({
+      isOpen: true,
+      skillName: item.description,
+      categoryName,
+      currentScore: item.score,
+      maxScore: currentAssessment?.maxScore ?? 4,
+    });
+  };
 
   const hasWeakSkillsInSelectedMonth = useMemo(() => {
     if (!selectedMonth) return false;
@@ -419,6 +576,18 @@ const StaffMemberView: React.FC<StaffMemberViewProps> = ({
 
   const renderMonthSelection = () => (
     <div className="max-w-4xl mx-auto">
+      {userRole !== UserRole.Staff && (
+        <div className="flex justify-start mb-6">
+          <button
+            onClick={onBack}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg shadow-sm hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+            title="بازگشت به بخش"
+          >
+            <BackIcon className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+            <span>بازگشت به بخش</span>
+          </button>
+        </div>
+      )}
       <div className="text-center mb-10">
         <h1 className="text-2xl font-semibold text-slate-600 dark:text-slate-300 mb-4">خوش آمدی {staffMember.name}</h1>
         <h2 className="text-3xl font-bold">انتخاب ماه برای {userRole === UserRole.Staff ? 'مشاهده عملکرد' : 'ثبت یا مشاهده عملکرد'}</h2>
@@ -487,13 +656,23 @@ const StaffMemberView: React.FC<StaffMemberViewProps> = ({
                 )}
                  {assessment && (
                     <button 
+                        onClick={handleOpenStaffPeriodicPlan} 
+                        className={`${navButtonClass} bg-gradient-to-br from-indigo-50 to-blue-50 dark:from-indigo-950/40 dark:to-blue-950/40 border-indigo-200 dark:border-indigo-800 hover:border-indigo-400`}
+                        title="شرح وضعیت کلی و برنامه ۱ ماهه، ۳ ماهه، ۶ ماهه و ۱ ساله هوش مصنوعی با امکان دریافت فایل ورد"
+                    >
+                        <AiIcon className="w-12 h-12 text-indigo-600 dark:text-indigo-400 animate-pulse"/>
+                        <span className="text-lg font-bold text-indigo-950 dark:text-indigo-100">برنامه ۱، ۳، ۶ و ۱ ساله (AI)</span>
+                        <span className="text-xs text-indigo-600 dark:text-indigo-400 font-normal">شرح وضعیت + خروجی Word</span>
+                    </button>
+                )}
+                 {assessment && (
+                    <button 
                         onClick={handleGetComprehensiveSuggestions} 
-                        disabled={!hasWeakSkillsInSelectedMonth} 
-                        className={`${navButtonClass} disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:hover:bg-white dark:disabled:hover:bg-slate-800`}
-                        title={!hasWeakSkillsInSelectedMonth ? "این پرسنل نقطه ضعفی برای ایجاد برنامه ندارد" : "مشاهده برنامه بهبود"}
+                        className={navButtonClass}
+                        title="مشاهده برنامه بهبود و مشاوره هوشمند هوش مصنوعی بر اساس ۵ مرجع بالینی"
                     >
                         <AiIcon className="w-12 h-12 text-rose-500"/>
-                        <span className="text-lg">برنامه بهبود</span>
+                        <span className="text-lg font-bold">برنامه بهبود سنجه‌ها</span>
                     </button>
                 )}
                 {assessment && (
@@ -637,8 +816,43 @@ const StaffMemberView: React.FC<StaffMemberViewProps> = ({
                 >
                     {!assessment ? <p className="text-center text-slate-500 py-10">ارزیابی برای این ماه ثبت نشده است.</p> : (
                         <div>
+                            {/* AI Improvement and Consultation Banner */}
+                            <div className="mb-6 bg-gradient-to-r from-indigo-50 via-purple-50 to-blue-50 dark:from-indigo-950/40 dark:via-purple-950/40 dark:to-blue-950/40 p-4 rounded-2xl border border-indigo-200 dark:border-indigo-800/60 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-md">
+                                        <AiIcon className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-slate-900 dark:text-slate-100 text-sm">برنامه بهبود و مشاوره هوشمند بالینی (هوش مصنوعی)</h3>
+                                        <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">پاسخ‌دهی و راهکارها منحصراً بر اساس گایدلاین‌های جهانی، پاتر و پری، برونر سودارث، بوکلت مادری و سنجه‌های اعتباربخشی</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <button
+                                        onClick={handleOpenStaffPeriodicPlan}
+                                        className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 whitespace-nowrap"
+                                        title="شرح وضعیت کلی و برنامه ۱، ۳، ۶ و ۱۲ ماهه هوش مصنوعی با خروجی ورد"
+                                    >
+                                        <AiIcon className="w-4 h-4 text-amber-300" />
+                                        <span>برنامه ۱، ۳، ۶ و ۱۲ ماهه (Word)</span>
+                                    </button>
+                                    <button
+                                        onClick={handleGetComprehensiveSuggestions}
+                                        className="px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 whitespace-nowrap"
+                                    >
+                                        <AiIcon className="w-4 h-4 text-amber-300" />
+                                        <span>مشاوره و برنامه سنجه‌ها</span>
+                                    </button>
+                                </div>
+                            </div>
+
                             {assessment.skillCategories.map((category) => (
-                                <SkillCategoryDisplay key={category.name} category={category} maxPossibleScore={assessment.maxScore} />
+                                <SkillCategoryDisplay 
+                                    key={category.name} 
+                                    category={category} 
+                                    maxPossibleScore={assessment.maxScore}
+                                    onGenerateSkillTraining={handleGenerateSkillTraining}
+                                />
                             ))}
                             {userRole !== UserRole.Staff && (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
@@ -886,7 +1100,14 @@ const StaffMemberView: React.FC<StaffMemberViewProps> = ({
         
         {renderCurrentScreen()}
 
-        <SuggestionModal isOpen={isSuggestionModalOpen} onClose={() => setIsSuggestionModalOpen(false)} title={`برنامه پیشنهادی برای ${staffMember.name}`} content={suggestionContent} isLoading={isSuggestionLoading}/>
+        <SuggestionModal
+          isOpen={isSuggestionModalOpen}
+          onClose={() => setIsSuggestionModalOpen(false)}
+          title={`برنامه بهبود مهارتی برای ${staffMember.name}`}
+          content={suggestionContent}
+          isLoading={isSuggestionLoading}
+          contextName={`پرسنل ${staffMember.name} (${staffMember.title || 'کادر درمان'})`}
+        />
         {previewMaterial && <PreviewModal isOpen={!!previewMaterial} onClose={() => setPreviewMaterial(null)} material={previewMaterial}/>}
         
         <Modal 
@@ -941,6 +1162,33 @@ const StaffMemberView: React.FC<StaffMemberViewProps> = ({
                  </div>
             </div>
         </Modal>
+
+        {/* AI Periodic Plan (1, 3, 6, 12 months) Modal with Word Export */}
+        <PeriodicPlanModal
+            isOpen={isPeriodicPlanModalOpen}
+            onClose={() => setIsPeriodicPlanModalOpen(false)}
+            title="برنامه راهبردی و شرح وضعیت مهارت‌ها (هوش مصنوعی)"
+            targetName={staffMember.name}
+            departmentName={department.name}
+            roleDescription={`پرسنل: ${staffMember.name} (${staffMember.title || 'کارشناس پرستاری'})`}
+            content={periodicPlanContent}
+            isLoading={isPeriodicPlanLoading}
+            onRegenerate={handleOpenStaffPeriodicPlan}
+            activeYear={activeYear}
+        />
+
+        {/* AI Skill-Specific Training Modal with Word Export */}
+        <SkillAiTrainingModal
+            isOpen={skillTrainingModalState.isOpen}
+            onClose={() => setSkillTrainingModalState(prev => ({ ...prev, isOpen: false }))}
+            skillName={skillTrainingModalState.skillName}
+            categoryName={skillTrainingModalState.categoryName}
+            departmentName={department.name}
+            staffName={staffMember.name}
+            currentScore={skillTrainingModalState.currentScore}
+            maxScore={skillTrainingModalState.maxScore ?? 4}
+            userRole={userRole}
+        />
     </div>
   );
 };

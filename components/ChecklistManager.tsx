@@ -5,6 +5,7 @@ import { PlusIcon } from './icons/PlusIcon';
 import { EditIcon } from './icons/EditIcon';
 import { TrashIcon } from './icons/TrashIcon';
 import { DocumentIcon } from './icons/DocumentIcon';
+import { BackIcon } from './icons/BackIcon';
 import * as XLSX from 'xlsx';
 
 interface ChecklistManagerProps {
@@ -84,8 +85,18 @@ const ChecklistManager: React.FC<ChecklistManagerProps> = ({ templates, onAddOrU
 
     return (
         <div className="p-4 sm:p-6 lg:p-8">
-            <div className="flex justify-between items-center mb-6">
-                <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100">مدیریت قالب‌های چک‌لیست</h1>
+            <div className="flex flex-wrap justify-between items-center mb-6 gap-4">
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={onBack}
+                        className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg shadow-sm hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                        title="بازگشت به بخش"
+                    >
+                        <BackIcon className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                        <span>بازگشت به بخش</span>
+                    </button>
+                    <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100">مدیریت قالب‌های چک‌لیست</h1>
+                </div>
                 <button
                     onClick={handleAddNew}
                     className="inline-flex items-center gap-2 px-4 py-2 font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"

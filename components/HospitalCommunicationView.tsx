@@ -87,7 +87,17 @@ const HospitalCommunicationView: React.FC<HospitalCommunicationViewProps> = ({ h
     <>
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md flex flex-col h-[calc(100vh-12rem)]">
         <div className="flex justify-between items-center p-4 border-b border-slate-200 dark:border-slate-700">
-          <h2 className="text-xl font-bold">تماس با ادمین کل - {hospital.name}</h2>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onBack}
+              className="inline-flex items-center gap-2 px-3.5 py-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg shadow-sm hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+              title="بازگشت به لیست بخش‌ها"
+            >
+              <BackIcon className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+              <span>بازگشت</span>
+            </button>
+            <h2 className="text-xl font-bold">تماس با ادمین کل - {hospital.name}</h2>
+          </div>
           <button 
             onClick={onRefreshChat} 
             className="p-2 rounded-full text-indigo-500 bg-indigo-100 dark:bg-indigo-900/50 hover:bg-indigo-200 dark:hover:bg-indigo-900 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"

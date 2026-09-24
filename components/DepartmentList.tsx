@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 // FIX: Import the 'Department' type.
 import { Hospital, UserRole, Department } from '../types';
 import Modal from './Modal';
+import ConfirmationModal from './ConfirmationModal';
 import { PlusIcon } from './icons/PlusIcon';
 import { TrashIcon } from './icons/TrashIcon';
 import { EditIcon } from './icons/EditIcon';
@@ -13,6 +14,11 @@ import { LightbulbIcon } from './icons/LightbulbIcon';
 import { CalendarIcon } from './icons/CalendarIcon';
 import { SaveIcon } from './icons/SaveIcon';
 import { UploadIcon } from './icons/UploadIcon';
+import { ClipboardDocumentListIcon } from './icons/ClipboardDocumentListIcon';
+import { AiIcon } from './icons/AiIcon';
+import { BackIcon } from './icons/BackIcon';
+import PeriodicPlanModal from './PeriodicPlanModal';
+import { generatePeriodicPlanWithAI } from '../services/geminiService';
 
 interface DepartmentListProps {
   hospital: Hospital;
@@ -24,6 +30,7 @@ interface DepartmentListProps {
   onManageAccreditation: () => void;
   onManageNewsBanners: () => void;
   onManageNeedsAssessment: () => void;
+  onManageCorrectiveActions: () => void;
   onResetHospital: (supervisorNationalId: string) => Promise<boolean>;
   onContactAdmin: () => void;
   onArchiveYear: (yearToArchive: number) => void;
@@ -41,6 +48,7 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
   onManageAccreditation,
   onManageNewsBanners,
   onManageNeedsAssessment,
+  onManageCorrectiveActions,
   onResetHospital,
   onContactAdmin,
   onArchiveYear,
@@ -49,6 +57,7 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDepartment, setEditingDepartment] = useState<Department | null>(null);
+  const [departmentToDelete, setDepartmentToDelete] = useState<Department | null>(null);
   const [newDepartmentName, setNewDepartmentName] = useState('');
   const [newManagerName, setNewManagerName] = useState('');
   const [newManagerNationalId, setNewManagerNationalId] = useState('');
@@ -67,6 +76,126 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
   const [archiveStep, setArchiveStep] = useState(1);
   const [yearConfirmation, setYearConfirmation] = useState('');
   const suggestedYear = new Date().toLocaleDateString('fa-IR-u-nu-latn').split('/')[0];
+
+  // State for Hospital-Level AI Strategic Plan (Supervisor Level)
+  const [isHospitalPlanOpen, setIsHospitalPlanOpen] = useState(false);
+  const [hospitalPlanContent, setHospitalPlanContent] = useState<string | null>(null);
+  const [isHospitalPlanLoading, setIsHospitalPlanLoading] = useState(false);
+  const [hospitalOverallAvg, setHospitalOverallAvg] = useState(80);
+  const [hospitalGenAvg, setHospitalGenAvg] = useState(80);
+  const [hospitalSpecAvg, setHospitalSpecAvg] = useState(80);
+  const [hospitalCommAvg, setHospitalCommAvg] = useState(80);
+  const [hospitalTotalStaff, setHospitalTotalStaff] = useState(0);
+
+  const handleOpenHospitalStrategicPlan = async () => {
+    setIsHospitalPlanOpen(true);
+    setIsHospitalPlanLoading(true);
+    setHospitalPlanContent(null);
+
+    try {
+      let totalAssessedStaff = 0;
+      let totalItems = 0;
+      let totalScoreSum = 0;
+      let genItems = 0;
+      let genScoreSum = 0;
+      let specItems = 0;
+      let specScoreSum = 0;
+      let commItems = 0;
+      let commScoreSum = 0;
+
+      const skillMap = new Map<string, { categoryName: string; totalScore: number; count: number }>();
+
+      (hospital.departments || []).forEach(dep => {
+        (dep.staff || []).forEach(staff => {
+          const staffAssessments = staff.assessments || [];
+          if (staffAssessments.length > 0) {
+            totalAssessedStaff++;
+            const latestAss = staffAssessments[staffAssessments.length - 1];
+            const maxScore = latestAss.maxScore ?? 4;
+
+            (latestAss.skillCategories || []).forEach(cat => {
+              const isGeneral = cat.name.includes('عمومی');
+              const isSpecial = cat.name.includes('تخصصی') || cat.name.includes('ویژه');
+              const isComm = cat.name.includes('ارتباط') || cat.name.includes('حقوق');
+              const catShort = isGeneral ? 'مهارت‌های عمومی' : isComm ? 'مهارت‌های ارتباطی' : 'مهارت‌های تخصصی';
+
+              (cat.items || []).forEach((item, itemIdx) => {
+                const score = typeof item.score === 'number' ? item.score : 0;
+                const normalizedScore = maxScore > 0 ? (score / maxScore) * 4 : 0;
+                const radif = item.radif || (itemIdx + 1);
+                const desc = item.description || (item as any).name || '';
+                const refText = `مهارت شماره ${radif} از ${catShort}`;
+                totalItems++;
+                totalScoreSum += normalizedScore;
+
+                if (isGeneral) { genItems++; genScoreSum += normalizedScore; }
+                else if (isSpecial) { specItems++; specScoreSum += normalizedScore; }
+                else if (isComm) { commItems++; commScoreSum += normalizedScore; }
+
+                const existing = skillMap.get(desc);
+                if (existing) {
+                  existing.totalScore += normalizedScore;
+                  existing.count += 1;
+                } else {
+                  skillMap.set(desc, {
+                    categoryName: catShort,
+                    totalScore: normalizedScore,
+                    count: 1,
+                    radif,
+                    referenceText: refText
+                  });
+                }
+              });
+            });
+          }
+        });
+      });
+
+      const oAvg = totalItems > 0 ? Math.round((totalScoreSum / (totalItems * 4)) * 100) : 80;
+      const gAvg = genItems > 0 ? Math.round((genScoreSum / (genItems * 4)) * 100) : 80;
+      const sAvg = specItems > 0 ? Math.round((specScoreSum / (specItems * 4)) * 100) : 80;
+      const cAvg = commItems > 0 ? Math.round((commScoreSum / (commItems * 4)) * 100) : 80;
+
+      setHospitalOverallAvg(oAvg);
+      setHospitalGenAvg(gAvg);
+      setHospitalSpecAvg(sAvg);
+      setHospitalCommAvg(cAvg);
+      setHospitalTotalStaff(totalAssessedStaff);
+
+      const skillsSummary = Array.from(skillMap.entries()).map(([skillName, data]) => {
+        const avgScore = data.count > 0 ? Number((data.totalScore / data.count).toFixed(2)) : 0;
+        const percentage = Math.round((avgScore / 4) * 100);
+        return {
+          skillName,
+          categoryName: data.categoryName,
+          radif: (data as any).radif,
+          referenceText: (data as any).referenceText,
+          score: avgScore,
+          percentage
+        };
+      });
+
+      const res = await generatePeriodicPlanWithAI({
+        mode: 'hospital',
+        targetTitle: `برنامه راهبردی و ارتقای مهارت‌های پرستاری مرکز درمانی ${hospital.name}`,
+        departmentName: 'کلیه بخش‌های درمانی و پاراکلینیکی بیمارستان',
+        hospitalName: hospital.name,
+        overallAvg: oAvg,
+        genAvg: gAvg,
+        specAvg: sAvg,
+        commAvg: cAvg,
+        totalStaffCount: totalAssessedStaff,
+        skillsSummary
+      });
+
+      setHospitalPlanContent(res.plan);
+    } catch (err) {
+      console.error('Failed to generate hospital strategic plan:', err);
+      setHospitalPlanContent('خطا در دریافت برنامه راهبردی کل بیمارستان. لطفاً مجدداً تلاش فرمایید.');
+    } finally {
+      setIsHospitalPlanLoading(false);
+    }
+  };
 
   const resetForm = () => {
       setNewDepartmentName('');
@@ -186,8 +315,30 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
   return (
     <div className="p-4 sm:p-6 lg:p-8">
       <div className="flex flex-wrap justify-between items-center mb-6 gap-4">
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100">بخش های بیمارستان: <span className="text-slate-600 dark:text-slate-400">{hospital.name}</span></h1>
+        <div className="flex items-center gap-3">
+          {userRole === UserRole.Admin && (
+            <button
+              onClick={onBack}
+              className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg shadow-sm hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              title="بازگشت به لیست بیمارستان‌ها"
+            >
+              <BackIcon className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+              <span>بازگشت به لیست بیمارستان‌ها</span>
+            </button>
+          )}
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100">
+            بخش های بیمارستان: <span className="text-slate-600 dark:text-slate-400">{hospital.name}</span>
+          </h1>
+        </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
+            <button
+              onClick={handleOpenHospitalStrategicPlan}
+              className={`${baseButtonClass} bg-gradient-to-r from-indigo-700 via-blue-700 to-indigo-800 hover:from-indigo-800 hover:to-blue-900 text-white shadow-md border border-indigo-400/30`}
+              title="تحلیل جامع هوش مصنوعی و تدوین برنامه راهبردی کل بیمارستان"
+            >
+              <AiIcon className="w-5 h-5 text-amber-300" />
+              برنامه راهبردی کل بیمارستان (هوش مصنوعی)
+            </button>
             {(userRole === UserRole.Supervisor || userRole === UserRole.Admin) && (
               <>
                  <button
@@ -215,6 +366,13 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
                 تماس با ادمین کل
               </button>
             )}
+            <button
+              onClick={onManageCorrectiveActions}
+              className={`${baseButtonClass} bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-500`}
+            >
+              <ClipboardDocumentListIcon className="w-5 h-5" />
+              اقدامات اصلاحی
+            </button>
             <button
               onClick={onManageNewsBanners}
               className={`${baseButtonClass} bg-cyan-500 hover:bg-cyan-600 focus:ring-cyan-400`}
@@ -280,9 +438,7 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    if(window.confirm(`آیا از حذف بخش "${dep.name}" مطمئن هستید؟`)) {
-                      onDeleteDepartment(dep.id);
-                    }
+                    setDepartmentToDelete(dep);
                   }}
                   className="p-2 text-slate-400 hover:text-red-500 bg-slate-100 dark:bg-slate-700 rounded-full"
                   aria-label="Delete Department"
@@ -464,8 +620,40 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
             </div>
             </div>
         )}
-       </Modal>
-    </div>
+        </Modal>
+
+        <ConfirmationModal
+          isOpen={!!departmentToDelete}
+          onClose={() => setDepartmentToDelete(null)}
+          onConfirm={() => {
+            if (departmentToDelete) {
+              onDeleteDepartment(departmentToDelete.id);
+              setDepartmentToDelete(null);
+            }
+          }}
+          title="تایید حذف بخش"
+          message={`آیا از حذف بخش "${departmentToDelete?.name}" مطمئن هستید؟ با حذف این بخش، تمامی اطلاعات پرسنل، چک‌لیست‌ها و ارزیابی‌های مربوط به آن به طور کامل حذف خواهند شد.`}
+          confirmButtonText="حذف بخش"
+          cancelButtonText="انصراف"
+        />
+
+        <PeriodicPlanModal
+          isOpen={isHospitalPlanOpen}
+          onClose={() => setIsHospitalPlanOpen(false)}
+          title={`برنامه راهبردی و بهبود کیفیت پرستاری کل بیمارستان (${hospital.name})`}
+          content={hospitalPlanContent}
+          isLoading={isHospitalPlanLoading}
+          overallAvg={hospitalOverallAvg}
+          genAvg={hospitalGenAvg}
+          specAvg={hospitalSpecAvg}
+          commAvg={hospitalCommAvg}
+          targetTitle={hospital.name}
+          mode="hospital"
+          hospitalName={hospital.name}
+          departmentName="کلیه بخش‌های درمانی و پاراکلینیکی"
+          totalStaffCount={hospitalTotalStaff}
+        />
+     </div>
   );
 };
 

@@ -5,6 +5,7 @@ import { Hospital, NeedsAssessmentTopic } from '../types';
 import { PlusIcon } from './icons/PlusIcon';
 import { TrashIcon } from './icons/TrashIcon';
 import { DocumentIcon } from './icons/DocumentIcon';
+import { BackIcon } from './icons/BackIcon';
 
 interface NeedsAssessmentManagerProps {
   hospital: Hospital;
@@ -132,7 +133,17 @@ const NeedsAssessmentManager: React.FC<NeedsAssessmentManagerProps> = ({ hospita
     return (
         <div className="p-4 sm:p-6 lg:p-8">
             <div className="flex flex-wrap justify-between items-center mb-6 gap-4">
-                <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100">مدیریت نیازسنجی و نظرسنجی - سال {activeYear}</h1>
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={onBack}
+                        className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg shadow-sm hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                        title="بازگشت به لیست بخش‌ها"
+                    >
+                        <BackIcon className="w-5 h-5 text-yellow-600 dark:text-yellow-400" />
+                        <span>بازگشت به لیست بخش‌ها</span>
+                    </button>
+                    <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100">مدیریت نیازسنجی و نظرسنجی - سال {activeYear}</h1>
+                </div>
                 <button
                     onClick={handleDownloadWord}
                     className="inline-flex items-center gap-2 px-4 py-2 font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"

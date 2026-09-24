@@ -22,7 +22,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onEnter }) => {
               بسم الله الرحمن الرحیم
           </h1>
           <h2 className="text-3xl md:text-4xl font-semibold text-slate-700 dark:text-slate-200 mt-6 mb-3 opacity-0 animate-fade-in-up animation-delay-400">
-              به سامانه بیمارستان من خوش آمدید
+              به سامانه جهش خوش آمدید
           </h2>
           <p className="text-xl md:text-2xl text-slate-500 dark:text-slate-400 mb-8 opacity-0 animate-fade-in-up animation-delay-600">
               سازنده: حسین نصاری
