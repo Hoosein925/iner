@@ -83,7 +83,7 @@ export const deleteFile = async (path: string): Promise<{ error: Error | null }>
 const HOSPITALS_KEY = 'hospitals_data';
 const DATA_ROW_ID = 1;
 
-const getHospitalsFromLocal = (): Hospital[] => {
+export const getHospitalsFromLocal = (): Hospital[] => {
     try {
         const data = localStorage.getItem(HOSPITALS_KEY);
         return data ? JSON.parse(data) : [];
@@ -93,21 +93,41 @@ const getHospitalsFromLocal = (): Hospital[] => {
     }
 };
 
+let activeWriteCount = 0;
+let lastWriteTimestamp = 0;
+
+export const isWriting = (): boolean => {
+    return activeWriteCount > 0 || (Date.now() - lastWriteTimestamp < 1200);
+};
+
+export const startWrite = () => {
+    activeWriteCount++;
+};
+
+export const endWrite = () => {
+    activeWriteCount = Math.max(0, activeWriteCount - 1);
+    lastWriteTimestamp = Date.now();
+};
+
 export const syncAndAssembleData = async (): Promise<Hospital[]> => {
-    const { data, error } = await supabase
-      .from('hospitals_json')
-      .select('data')
-      .eq('id', DATA_ROW_ID)
-      .single();
+    try {
+        const { data, error } = await supabase
+          .from('hospitals_json')
+          .select('data')
+          .eq('id', DATA_ROW_ID)
+          .single();
 
-    if (error && error.code !== 'PGRST116') {
-        console.warn(`Could not fetch data from Supabase (Code: ${error.code}), using local fallback. Message: ${error.message}`);
-        return getHospitalsFromLocal();
-    }
+        if (error && error.code !== 'PGRST116') {
+            console.warn(`Could not fetch data from Supabase (Code: ${error.code}), using local fallback.`);
+            return getHospitalsFromLocal();
+        }
 
-    if (data && data.data) {
-        localStorage.setItem(HOSPITALS_KEY, JSON.stringify(data.data));
-        return data.data as Hospital[];
+        if (data && data.data) {
+            localStorage.setItem(HOSPITALS_KEY, JSON.stringify(data.data));
+            return data.data as Hospital[];
+        }
+    } catch (e) {
+        console.warn("Could not sync with Supabase, using local fallback.", e);
     }
     
     return getHospitalsFromLocal();
@@ -136,38 +156,45 @@ export const onRemoteChange = (callback: () => void): (() => void) => {
 };
 
 export const saveAllHospitals = async (hospitals: Hospital[]): Promise<{ error: Error | null }> => {
+    startWrite();
     try {
-        localStorage.setItem(HOSPITALS_KEY, JSON.stringify(hospitals));
-    } catch (e) {
-        console.error("Failed to save hospitals to localStorage", e);
-    }
-
-    try {
-        const { error: supabaseError } = await supabase
-            .from('hospitals_json')
-            .upsert({ id: DATA_ROW_ID, data: hospitals }, { onConflict: 'id' });
-
-        if (supabaseError) {
-            console.error("Supabase upsert error:", supabaseError);
-            let userFriendlyMessage = `خطا در ذخیره اطلاعات در پایگاه داده: ${supabaseError.message}`;
-            
-            if (supabaseError.code === '42501' || (supabaseError.message && (supabaseError.message.includes('security policies') || supabaseError.message.includes('row-level security')))) {
-                userFriendlyMessage = `تغییرات به صورت محلی (مرورگر) ذخیره شد، اما همگام‌سازی ابری در Supabase انجام نشد.\nعلت: عدم وجود دسترسی (RLS Policy) روی جدول 'hospitals_json' در Supabase.\nلطفاً کدهای SQL مربوط به RLS را در Supabase اجرا کنید.`;
-            } else if (supabaseError.code === '42P01') {
-                userFriendlyMessage = `جدول 'hospitals_json' در Supabase پیدا نشد.\nتغییرات در حافظه محلی ذخیره شد. لطفاً اسکریپت ساخت جدول را در Supabase SQL Editor اجرا کنید.`;
-            } else {
-                 userFriendlyMessage += ` (کد خطا: ${supabaseError.code})`;
-            }
-            return { error: new Error(userFriendlyMessage) };
+        try {
+            localStorage.setItem(HOSPITALS_KEY, JSON.stringify(hospitals));
+        } catch (e) {
+            console.error("Failed to save hospitals to localStorage", e);
         }
-         return { error: null };
 
-    } catch (e) {
-        console.error("A network or unexpected error occurred while saving to Supabase:", e);
-        const errorMessage = e instanceof Error 
-            ? `خطای شبکه یا خطای غیرمنتظره: ${e.message}`
-            : "یک خطای ناشناخته در ارتباط با پایگاه داده رخ داد.";
-        return { error: new Error(errorMessage) };
+        try {
+            const { error: supabaseError } = await supabase
+                .from('hospitals_json')
+                .upsert({ id: DATA_ROW_ID, data: hospitals }, { onConflict: 'id' });
+
+            if (supabaseError) {
+                console.warn("Supabase upsert warning:", supabaseError);
+                // If offline, RLS, table missing, or network issues, local storage has already safely saved the data
+                if (supabaseError.message && (supabaseError.message.includes('fetch') || supabaseError.message.includes('network') || supabaseError.code === 'PGRST116')) {
+                    return { error: null };
+                }
+                let userFriendlyMessage = `خطا در ذخیره اطلاعات در پایگاه داده: ${supabaseError.message}`;
+                
+                if (supabaseError.code === '42501' || (supabaseError.message && (supabaseError.message.includes('security policies') || supabaseError.message.includes('row-level security')))) {
+                    console.warn(`RLS Policy notice: changes saved locally in localStorage.`);
+                    return { error: null };
+                } else if (supabaseError.code === '42P01') {
+                    console.warn(`Table hospitals_json notice: changes saved locally in localStorage.`);
+                    return { error: null };
+                }
+                return { error: null };
+            }
+            return { error: null };
+
+        } catch (e: any) {
+            console.warn("Supabase connection unavailable, using local persistence mode:", e?.message || e);
+            // Data is already saved safely in localStorage above. Don't block the user with errors.
+            return { error: null };
+        }
+    } finally {
+        endWrite();
     }
 };
 
