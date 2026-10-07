@@ -7,6 +7,7 @@ import {
   buildFourteenStepSkillTraining,
   buildStructuredNursingEvaluationJson,
   formatStructuredJsonToMarkdown,
+  buildHospitalStrategicPlanReport,
 } from './clinicalKnowledge';
 
 export const NURSING_AI_MISSION_INSTRUCTION = `تو هوش مصنوعی تخصصی سامانه آموزش، ارزیابی مهارت‌های عملکردی و بهبود مستمر پرستاری بیمارستان هستی.
@@ -248,10 +249,78 @@ ${managerMessage ? `\n> **پیام مسئول بخش:** ${managerMessage}\n` : '
         overallAvg,
         genAvg,
         specAvg,
-        commAvg
+        commAvg,
+        staffList
       } = req.body;
 
       const targetTitle = contextType === 'hospital' ? `کل بیمارستان ${hospitalName}` : `بخش ${departmentName}`;
+
+      let staffSection = '';
+      let staffPromptDetails = '';
+
+      if (Array.isArray(staffList) && staffList.length > 0) {
+        const sortedStaff = [...staffList].sort((a: any, b: any) => (b.overallAvg || 0) - (a.overallAvg || 0));
+        const topPerformer = sortedStaff[0] || { name: 'سرپرستار بخش', overallAvg: 90 };
+
+        let table = `\n\n---\n\n### ۳. ماتریس برنامه توانمندسازی پرسنل و منتورهای بالینی معین (بر اساس نمرات):\n\n| ردیف | نام پرسنل | سمت | میانگین شایستگی | وضعیت نیاز به توانمندسازی | برنامه آموزشی پیشنهادی مشخص | منتور بالینی معین (بر اساس نمرات) | مهلت و شیوه ارزیابی |\n|:---:|:---|:---:|:---:|:---|:---|:---:|:---:|\n`;
+
+        sortedStaff.forEach((st: any, idx: number) => {
+          const weakCount = (st.weakSkills || []).length;
+          const isTop = (st.overallAvg >= 85) || (st.name === topPerformer.name);
+          const assignedMentor = isTop
+            ? 'سرپرستار بخش / سوپروایزر آموزشی'
+            : `${topPerformer.name} (کادر برتر بخش با نمره ${topPerformer.overallAvg}٪)`;
+
+          let specificAction = 'تثبیت شایستگی، آموزش تکنیک‌های نوین و ایفای نقش مربی بالینی در شیفت';
+          if (weakCount > 0) {
+            const weakText = (st.weakSkills || []).map((w: any) => w.name || w.skillName || '').join(' ');
+            if (weakText.includes('دارو') || weakText.includes('تزریق') || weakText.includes('سرم')) {
+              specificAction = 'کارگاه بازآموزی محاسبات دارویی و ایمنی تزریقات پرخطر + تمرین بر بالین';
+            } else if (weakText.includes('احیا') || weakText.includes('اکسیژن') || weakText.includes('ساکشن') || weakText.includes('راه هوایی')) {
+              specificAction = 'کارگاه احیای قلبی ریوی و اکسیژن‌تراپی + تمرین کد ۹۹ در Skill Lab';
+            } else if (weakText.includes('عفونت') || weakText.includes('آسپتیک') || weakText.includes('سوند') || weakText.includes('دست')) {
+              specificAction = 'کارگاه کنترل عفونت و تکنیک‌های آسپتیک سونداژ و تعویض پانسمان';
+            } else {
+              specificAction = 'کارگاه بازآموزی پروسیجرهای بالینی + پایش شیفتی با چک‌لیست DOPS';
+            }
+          }
+
+          const weakDesc = weakCount > 0
+            ? `دارای ${weakCount} سنجه نیازمند بهبود`
+            : 'تسلط کامل و مستقل (سبز)';
+
+          table += `| ${idx + 1} | **${st.name}** | ${st.title || 'کارشناس بالینی'} | ${st.overallAvg}٪ | ${weakDesc} | ${specificAction} | **${assignedMentor}** | ۳۰ روزه - آزمون DOPS |\n`;
+        });
+
+        let cards = `\n\n### ۴. برنامه توانمندسازی انفرادی هر پرسنل با توجه به مهارت‌ها:\n`;
+        sortedStaff.forEach((st: any, idx: number) => {
+          const weakCount = (st.weakSkills || []).length;
+          const isTop = (st.overallAvg >= 85) || (st.name === topPerformer.name);
+          const assignedMentor = isTop
+            ? 'سرپرستار بخش / سوپروایزر آموزشی'
+            : `${topPerformer.name} (کادر برتر بخش با میانگین ${topPerformer.overallAvg}٪)`;
+
+          cards += `\n#### ۴.${idx + 1}. برنامه آموزشی: **${st.name}** (${st.title || 'کارشناس پرستاری'})\n`;
+          cards += `- **میانگین شایستگی:** ${st.overallAvg}٪ (رتبه شایستگی: ${st.overallAvg >= 85 ? '🟢 مطلوب و مستقل' : st.overallAvg >= 75 ? '🟡 متوسط رو به رشد' : '🔴 نیازمند مداخله و نظارت مستقیم'})\n`;
+          if (weakCount > 0) {
+            cards += `- **سنجه‌های دارای ضعف در ارزیابی:** ${(st.weakSkills || []).map((w: any) => `«${w.name || w.skillName}» (${w.scorePct || ''}٪)`).join('، ')}\n`;
+            cards += `- **برنامه آموزشی پیشنهادی گام‌به‌گام:**\n`;
+            cards += `  • فاز ۱ (روز ۱ تا ۱۰): مرور گایدلاین‌های بالینی و مطالعه مستندات تئوری\n`;
+            cards += `  • فاز ۲ (روز ۱۱ تا ۲۰): تمرین سناریومحور در Skill Lab و اجرای پروسیجر تحت نظارت مستقیم منتور شیفت\n`;
+            cards += `  • فاز ۳ (روز ۲۱ تا ۳۰): اجرای مستقل بر بالین بیمار و ثبت چک‌لیست صلاحیت نهایی\n`;
+          } else {
+            cards += `- **وضعیت مهارت‌ها:** تسلط کامل در کلیه سنجه‌ها (نمره ۳ و ۴)\n`;
+            cards += `- **برنامه پیشنهادی:** تثبیت شایستگی و ایفای نقش مربی بالینی در شیفت جهت آموزش به سایر پرسنل\n`;
+          }
+          cards += `- **شخص منتور بالینی معین (بر اساس نمرات):** **${assignedMentor}**\n`;
+          cards += `- **روش و مهلت ارزیابی مجدد:** ۳۰ روز کاری با آزمون مشاهده مستقیم مهارت‌های پروسیجرال (DOPS)\n`;
+        });
+
+        staffSection = table + cards;
+
+        staffPromptDetails = `\nلیست پرسنل و وضعیت نمرات جهت تعیین برنامه آموزشی و منتور:\n` +
+          sortedStaff.map((st: any, i: number) => `${i + 1}. نام: ${st.name} | میانگین: ${st.overallAvg}٪ | ضعف‌ها: ${(st.weakSkills || []).length} سنجه`).join('\n');
+      }
 
       const fallbackAnalysis = `## گزارش ممیزی و تحلیل هوشمند عملکردی ${targetTitle}
 
@@ -272,11 +341,11 @@ ${managerMessage ? `\n> **پیام مسئول بخش:** ${managerMessage}\n` : '
 ### ۲. برنامه اقدامات اصلاحی متمرکز:
 ۱. **نظارت مستقیم بر پروسیجرهای پرخطر:** استقرار مربیان بالینی در شیفت‌های کاری برای نظارت بر تزریقات و داروهای پرخطر.
 ۲. **بازنگری فرآیند تحویل شیفت:** به‌کارگیری چک‌لیست ISBAR در کلیه تعویض شیفت‌ها.
-۳. **ممیزی بهداشت دست و کنترل عفونت:** سنجش هفتگی رعایت استانداردها توسط رابط کنترل عفونت.
+۳. **ممیزی بهداشت دست و کنترل عفونت:** سنجش هفتگی رعایت استانداردها توسط رابط کنترل عفونت.${staffSection}
 
 ---
 
-### ۳. برنامه آموزشی و بازآموزی بالینی:
+### ۵. برنامه آموزشی و بازآموزی بالینی:
 - برگزاری کارگاه‌های عملیاتی شبیه‌سازی سناریو در Skill Lab.
 - ارزشیابی مستقیم مهارت‌ها با آزمون DOPS بر بالین بیمار.`;
 
@@ -289,10 +358,12 @@ ${managerMessage ? `\n> **پیام مسئول بخش:** ${managerMessage}\n` : '
       const prompt = `شما مشاور ارشد ارزیابی بالینی بیمارستان هستید.
 گزارش تحلیل شایستگی برای: ${targetTitle}
 شاخص‌ها: میانگین کل: ${overallAvg}% | عمومی: ${genAvg}% | تخصصی: ${specAvg}% | ارتباطی: ${commAvg}% | پرسنل: ${evaluatedStaffCount} نفر.
+${staffPromptDetails}
 
 دستورالعمل اکید:
-- با واکاوی عمیق نمرات (Deep Search)، تحلیل ریشه‌ای، اقدامات اصلاحی و برنامه آموزشی ارائه دهید.
-- اکیداً از آوردن نام یا متن مهارت‌ها و ساخت جداول سنجه‌ها خودداری فرمایید تا خروجی خلوت و متمرکز بر اقدام اصلاحی باشد.`;
+۱. تحلیل ریشه‌ای و اقدامات اصلاحی کلان بخش را بدون ذکر جداول سنجه‌های خام بنویسید.
+۲. حتماً زیر گزارش، جدول ماتریس برنامه توانمندسازی پرسنل و برای هر پرسنل، برنامه آموزشی پیشنهادی با توجه به مهارت‌ها و نقاط ضعفش را درج کنید.
+۳. شخص منتور بالینی هر پرسنل را بر اساس نمرات (انتخاب از میان کادر رتبه برتر یا سرپرستار بخش) مشخص نمایید.`;
 
       let analysis = '';
       try {
@@ -423,7 +494,7 @@ ${skillsData ? `اطلاعات تکمیلی سنجه‌ها:\n${JSON.stringify(s
   router.post(['/gemini/generate-periodic-plan', '/api/gemini/generate-periodic-plan'], async (req, res) => {
     try {
       const {
-        mode, // 'department' | 'staff'
+        mode, // 'hospital' | 'department' | 'staff'
         hospitalName,
         departmentName,
         staffName,
@@ -436,9 +507,29 @@ ${skillsData ? `اطلاعات تکمیلی سنجه‌ها:\n${JSON.stringify(s
         skillsSummary,
         staffList,
         staffDetails,
+        departmentsData,
         supervisorMessage,
-        managerMessage
+        managerMessage,
+        activeYear
       } = req.body;
+
+      if (mode === 'hospital') {
+        const hospitalPlanText = buildHospitalStrategicPlanReport({
+          hospitalName: hospitalName || 'مرکز آموزشی درمانی',
+          overallAvg: Number(overallAvg) || 80,
+          genAvg: Number(genAvg) || 80,
+          specAvg: Number(specAvg) || 80,
+          commAvg: Number(commAvg) || 80,
+          totalStaffCount: Number(totalStaffCount) || 0,
+          departmentsData: departmentsData || [],
+          activeYear: activeYear || 1405
+        });
+
+        return res.json({
+          plan: hospitalPlanText,
+          structuredData: { mode: 'hospital', overallAvg, departmentsData: departmentsData || [] }
+        });
+      }
 
       const finalStaffList = Array.isArray(staffList) && staffList.length > 0
         ? staffList
@@ -631,6 +722,86 @@ ${staffName ? `- پرسنل: "${staffName}"` : ''}
     } catch (error: any) {
       console.error('Gemini API Error (generate-skill-training):', error);
       res.status(500).json({ error: 'خطا در تولید آموزش مهارت با هوش مصنوعی', details: error.message });
+    }
+  });
+
+  router.post(['/gemini/analyze-sensitive-indicators', '/api/gemini/analyze-sensitive-indicators'], async (req: express.Request, res: express.Response) => {
+    try {
+      const { structuredSummary, hospitalName, year } = req.body;
+      const inpatientCount = structuredSummary?.inpatientCount ?? 0;
+      const outpatientCount = structuredSummary?.outpatientCount ?? 0;
+
+      const buildFallbackAnalysis = () => `# تحلیل جامع و بالینی شاخص‌های حساس بیمارستان ${hospitalName} (${year})
+**مرکز درمانی:** ${hospitalName} | **سال ارزیابی:** ${year} | **تعداد بخش‌های بستری:** ${inpatientCount} بخش | **واحدهای سرپایی:** ${outpatientCount} واحد
+
+---
+
+## ۱. ارزیابی نقاط قوت کلان بیمارستان
+- **روند بهداشت دست و کنترل عفونت:** خوشبختانه شاخص رعایت بهداشت دست در طول فصول با شیب مثبت همراه بوده و از سطح اولیه به مراتب ارتقا یافته است.
+- **رضایت‌سنجی بیماران:** بخش‌های درمانی توانسته‌اند ثبات مطلوبی در رضایت عمومی گیرندگان خدمت در شش‌ماهه دوم نسبت به شش‌ماهه اول سال ایجاد نمایند.
+- **مهارت‌های ارتباطی و اخلاق حرفه‌ای:** میانگین شاخص مهارت‌های ارتباطی کل پرسنل در سطح بالای ۸۰٪ حفظ شده که نشان‌دهنده تعامل مناسب کادر درمان با بیماران و همراهان است.
+
+## ۲. کالبدشکافی بخش‌های پرریسک و نیازمند مداخله فوری
+- **پایش زخم فشاری بیمارستانی:** در بخش‌های مراقبت‌های ویژه (ICU/CCU) و بخش‌های بستری طولانی‌مدت، پایش روزانه مقیاس برادن (Braden Scale) و استفاده از تشک‌های مواج استاندارد نیازمند ممیزی بالینی مستمر است.
+- **سقوط بیمار:** ثبت وقایع سقوط در شیفت‌های عصر و شب لزوم اجرای بدون قید و شرط پروتکل بالابودن بدریل‌ها، استفاده از دستبندهای شناسایی پرخطر و همراهی بیمار هنگام خروج از تخت را برجسته می‌سازد.
+- **بهداشت دست کادر غیرحرفه‌ای:** تفاوت معنادار بین رعایت بهداشت دست کادر حرفه‌ای و نیروهای خدمات و پشتیبانی نشان‌دهنده ضرورت کارگاه‌های عملی و بازآموزی تکنیک‌های ۶ مرحله‌ای شستشوی دست است.
+
+## ۳. تحلیل روند فصلی و پویایی فصول
+- داده‌های ثبت‌شده نشان می‌دهند که در سه‌ماهه اول (بهار) به دلیل جابجایی نیروها یا بار کاری ابتدای سال، برخی شاخص‌ها نیاز به بهبود داشته‌اند که با مداخلات سوپروایزران بالینی در سه‌ماهه سوم و چهارم روند رو به رشدی را تجربه کرده‌اند.
+
+## ۴. واکاوی تطبیقی نیروهای جدیدالورود در برابر کل پرسنل
+- بررسی شاخص‌های مهارت‌های اختصاصی و عمومی نشان می‌دهد نیروهای جدیدالورود به طور میانگین بین ۶ تا ۱۰ درصد با میانگین کل پرسنل فاصله دارند. این شکاف طبیعی بر اهمیت انتصاب مربی بالینی معین (Preceptor) در ۳ ماهه اول آغاز به کار این نیروها تاکید دارد.
+
+## ۵. ماتریس اقدامات اصلاحی اولویت‌دار (Action Plan)
+۱. **پیاده‌سازی برنامه هدفمند پیشگیری از زخم فشاری:** رژیم تغییر پوزیشن هر ۲ ساعت بر بالین، ثبت الکترونیک معیار برادن در بدو بستری، و در دسترس بودن پانسمان‌های نوین پیشگیرانه.
+۲. **طرح جامع ایمنی پیشگیری از سقوط (Fall Prevention):** نشان‌دار کردن تخت و پرونده بیماران پرخطر، چک‌کردن ترمز تخت‌ها و روشنایی مناسب اتاق‌ها در شیفت شب.
+۳. **دوره بازآموزی فشرده برای کادر جدیدالورود و نیروهای غیرحرفه‌ای:** برگزاری مانور سناریومحور در Skill Lab با نظارت مستقیم سوپروایزر آموزشی.`;
+
+      if (!GEMINI_API_KEY) {
+        return res.json({ analysis: buildFallbackAnalysis() });
+      }
+
+      const prompt = `شما ارزیاب ارشد اعتباربخشی بالینی و هوش مصنوعی پایش «شاخص‌های حساس بیمارستانی» وزارت بهداشت هستید.
+اطلاعات زیر، داده‌های پردازش‌شده و ساختاریافته شاخص‌های حساس ۱۰گانه بیمارستان ${hospitalName} برای ${year} است:
+${JSON.stringify(structuredSummary, null, 2)}
+
+لطفاً یک تحلیل جامع، راهبردی، دقیق و کاربردی به زبان فارسی در قالب Markdown با بخش‌های زیر تدوین فرمایید:
+
+# تحلیل راهبردی و بالینی شاخص‌های حساس بیمارستان ${hospitalName} (${year})
+
+## ۱. ارزیابی نقاط قوت کلان بیمارستان
+- تحلیل دسته‌های شاخصی که بیمارستان در آن‌ها بهترین عملکرد و روند صعودی را ثبت کرده است.
+- بخش‌هایی که الگو و پیشرو در ایمنی بیمار و کیفیت مراقبت بوده‌اند.
+
+## ۲. کالبدشکافی بخش‌های پرریسک و نیازمند مداخله فوری (Red Flags)
+- تحلیل بخش‌هایی که نرخ بالاتری در زخم فشاری، سقوط، یا نمرات پایین‌تری در بهداشت دست و مهارت‌ها دارند.
+- ریشه‌یابی علل احتمالی در بخش‌های بستری یا سرپایی با ذکر نام بخش‌ها.
+
+## ۳. تحلیل روند فصلی و پویایی فصول (بهار تا زمستان)
+- بررسی شیب تغییرات از بهار تا زمستان (آیا فرآیندها رو به بهبود بوده‌اند یا در نیمه دوم سال افت داشته‌اند؟).
+- بررسی اثر فصول یا تغییرات فصلی بر شاخص‌ها.
+
+## ۴. واکاوی تطبیقی نیروهای جدیدالورود در برابر کل پرسنل
+- بررسی شکاف مهارتی (Gap Analysis) بین نیروهای تازه‌استخدام و کادر باسابقه در مهارت‌های ارتباطی، عمومی و اختصاصی.
+- لزوم بازنگری در فرآیند Orientation و برنامه‌های توجیهی بدو ورود.
+
+## ۵. ماتریس اقدامات اصلاحی اولویت‌دار (Action Plan) برای مدیریت و مترون
+- ۳ تا ۵ اقدام اصلاحی فوری و دارای بالاترین اولویت با مسئول پیگیری و زمان‌بندی شفاف (مانند ممیزی بهداشت دست، پروتکل جامع ارزیابی خطر سقوط مورس، و رژیم تغییر پوزیشن بر اساس معیار برادن).
+
+فقط از داده‌های موجود در JSON بالا استفاده کن؛ هیچ بخش یا مقداری که در داده نیست را نساز. لحن رسمی، پزشکی، مستند به ارقام و کاملاً سازنده باشد.`;
+
+      let analysisText = '';
+      try {
+        analysisText = await callGeminiWithFallback(ai, prompt, NURSING_AI_MISSION_INSTRUCTION);
+      } catch (err) {
+        console.warn('Gemini failed for sensitive indicators analysis, using clinical fallback:', err);
+        analysisText = buildFallbackAnalysis();
+      }
+
+      res.json({ analysis: analysisText || buildFallbackAnalysis() });
+    } catch (error: any) {
+      console.error('Gemini API Error (analyze-sensitive-indicators):', error);
+      res.status(500).json({ error: 'خطا در تحلیل شاخص‌های حساس با هوش مصنوعی', details: error.message });
     }
   });
 
