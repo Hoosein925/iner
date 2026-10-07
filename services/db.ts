@@ -1,4 +1,4 @@
-import { Hospital, LoggedInUser, UserRole, Department, StaffMember, Assessment, TrainingMaterial, NewsBanner, Patient, ChatMessage, AdminMessage, NeedsAssessmentTopic } from '../types';
+import { Hospital, LoggedInUser, UserRole, Department, StaffMember, Assessment, TrainingMaterial, NewsBanner, Patient, ChatMessage, AdminMessage, NeedsAssessmentTopic, ProvincialOfficer, ArchivedArticleTemplate, AppAboutInfo } from '../types';
 // FIX: The RealtimeChannel type is not exported from supabase-js anymore.
 // The type will be inferred from the supabase client instance.
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -300,15 +300,18 @@ export const upsertDepartment = async (department: Department, hospitalId: strin
     return saveAllHospitals(hospitals);
 };
 
-export const deleteDepartment = async (departmentId: string): Promise<{ error: Error | null }> => {
+export const deleteDepartment = async (departmentId: string, hospitalId: string): Promise<{ error: Error | null }> => {
     const hospitals = await syncAndAssembleData();
-    let departmentToDelete: Department | undefined;
-    
-    hospitals.forEach(h => {
-        const dept = h.departments.find(d => d.id === departmentId);
-        if(dept) departmentToDelete = dept;
-        h.departments = h.departments.filter(d => d.id !== departmentId);
-    });
+
+    // Scope strictly to the hospital the caller is authorized for. This prevents a
+    // department ID from ever being deleted from the wrong hospital's data.
+    const hospital = hospitals.find(h => h.id === hospitalId);
+    if (!hospital) return { error: new Error("Hospital not found") };
+
+    const departmentToDelete = hospital.departments.find(d => d.id === departmentId);
+    if (!departmentToDelete) return { error: new Error("Department not found in this hospital") };
+
+    hospital.departments = hospital.departments.filter(d => d.id !== departmentId);
 
     const saveResult = await saveAllHospitals(hospitals);
 
@@ -326,39 +329,55 @@ export const deleteDepartment = async (departmentId: string): Promise<{ error: E
     return saveResult;
 };
 
-export const upsertStaff = async (staff: StaffMember, departmentId: string): Promise<{ error: Error | null }> => {
+export const upsertStaff = async (staff: StaffMember, departmentId: string, hospitalId: string): Promise<{ error: Error | null }> => {
     const hospitals = await syncAndAssembleData();
-    for (const h of hospitals) {
-        const department = h.departments.find(d => d.id === departmentId);
-        if (department) {
-            const staffIndex = department.staff.findIndex(s => s.id === staff.id);
-            if (staffIndex > -1) department.staff[staffIndex] = staff; else department.staff.push(staff);
-            return saveAllHospitals(hospitals);
-        }
-    }
-    return { error: new Error("Department not found") };
-};
 
-export const deleteStaff = async (staffId: string): Promise<{ error: Error | null }> => {
-    const hospitals = await syncAndAssembleData();
-    hospitals.forEach(h => { h.departments.forEach(d => { d.staff = d.staff.filter(s => s.id !== staffId); }); });
+    // Scope strictly to the hospital the caller is authorized for, instead of searching
+    // every hospital's departments for a matching ID.
+    const hospital = hospitals.find(h => h.id === hospitalId);
+    if (!hospital) return { error: new Error("Hospital not found") };
+
+    const department = hospital.departments.find(d => d.id === departmentId);
+    if (!department) return { error: new Error("Department not found in this hospital") };
+
+    const staffIndex = department.staff.findIndex(s => s.id === staff.id);
+    if (staffIndex > -1) department.staff[staffIndex] = staff; else department.staff.push(staff);
     return saveAllHospitals(hospitals);
 };
 
-export const upsertAssessment = async (assessment: Assessment, staffId: string): Promise<{ error: Error | null }> => {
+export const deleteStaff = async (staffId: string, hospitalId: string): Promise<{ error: Error | null }> => {
     const hospitals = await syncAndAssembleData();
-    for (const h of hospitals) {
-        for (const d of h.departments) {
-            const staff = d.staff.find(s => s.id === staffId);
-            if (staff) {
-                if (!staff.assessments) staff.assessments = [];
-                const assessmentIndex = staff.assessments.findIndex(a => a.id === assessment.id);
-                if (assessmentIndex > -1) staff.assessments[assessmentIndex] = assessment; else staff.assessments.push(assessment);
-                return saveAllHospitals(hospitals);
-            }
+
+    const hospital = hospitals.find(h => h.id === hospitalId);
+    if (!hospital) return { error: new Error("Hospital not found") };
+
+    let found = false;
+    hospital.departments.forEach(d => {
+        const before = d.staff.length;
+        d.staff = d.staff.filter(s => s.id !== staffId);
+        if (d.staff.length !== before) found = true;
+    });
+    if (!found) return { error: new Error("Staff member not found in this hospital") };
+
+    return saveAllHospitals(hospitals);
+};
+
+export const upsertAssessment = async (assessment: Assessment, staffId: string, hospitalId: string): Promise<{ error: Error | null }> => {
+    const hospitals = await syncAndAssembleData();
+
+    const hospital = hospitals.find(h => h.id === hospitalId);
+    if (!hospital) return { error: new Error("Hospital not found") };
+
+    for (const d of hospital.departments) {
+        const staff = d.staff.find(s => s.id === staffId);
+        if (staff) {
+            if (!staff.assessments) staff.assessments = [];
+            const assessmentIndex = staff.assessments.findIndex(a => a.id === assessment.id);
+            if (assessmentIndex > -1) staff.assessments[assessmentIndex] = assessment; else staff.assessments.push(assessment);
+            return saveAllHospitals(hospitals);
         }
     }
-    return { error: new Error("Staff member not found") };
+    return { error: new Error("Staff member not found in this hospital") };
 };
 
 // ===================================================================
@@ -454,27 +473,181 @@ export const updateNeedsAssessmentTopics = (hospitalId: string, month: string, y
 //  USER AUTH
 // ===================================================================
 
-export const findUser = (hospitals: Hospital[], nationalId: string, password: string): LoggedInUser | null => {
-  if (nationalId === '5850008985' && password === '64546') {
+// The super-admin credential is never stored as plain text in the source. Instead we
+// store the SHA-256 hash of "<nationalId>:<password>" and compare hashes at login time,
+// so the raw national ID / password never appear in the bundled client code.
+// (Computed once and pinned here; see sha256Hex below for how a candidate is hashed.)
+const ADMIN_CREDENTIAL_HASH = 'f6b88b2ab0047b42be4053a12a697dbd7e1e2c03cf097ef4f5c31505b3946d51';
+
+async function sha256Hex(input: string): Promise<string> {
+  const encoded = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest('SHA-256', encoded);
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+export const DEFAULT_PROVINCES = [
+  'تهران', 'خوزستان', 'اصفهان', 'فارس', 'خراسان رضوی', 'آذربایجان شرقی', 
+  'مازندران', 'گیلان', 'کرمان', 'یزد', 'البرز', 'هرمزگان', 'بوشهر', 
+  'همدان', 'کرمانشاه', 'لرستان', 'سیستان و بلوچستان', 'مرکزی', 'قم', 'قزوین'
+];
+
+export const DEFAULT_ABOUT_INFO: AppAboutInfo = {
+  title: 'درباره سامانه جهش',
+  description:
+    'سامانه جهش یک پلتفرم پیشرفته و یکپارچه برای مدیریت هوشمند عملکرد و توانمندسازی پرسنل مراکز درمانی است. این سامانه با هدف دیجیتالی کردن فرآیندهای ارزیابی، آموزش و بهبود مستمر طراحی شده تا به مدیران در تصمیم‌گیری‌های مبتنی بر داده و به پرسنل در مسیر رشد حرفه‌ای خود کمک کند.',
+  features: [
+    'مدیریت جامع: تعریف و مدیریت همزمان چندین بیمارستان، بخش و پرسنل با سطوح دسترسی مختلف (ادمین، معاونت درمان، سوپروایزر، مسئول بخش).',
+    'ارزیابی عملکرد: امکان بارگذاری چک‌لیست‌های عملکردی از طریق فایل اکسل یا ساخت قالب‌های سفارشی درون برنامه برای ارزیابی دقیق مهارت‌ها.',
+    'آزمون‌های آنلاین با سوالات تصادفی: طراحی و برگزاری آزمون‌های تئوری با گزینش رندوم سوالات و گزینه‌ها جهت ممانعت از تقلب.',
+    'مدیریت آموزش چندرسانه‌ای: نگارش مقالات غنی آموزشی با امکانات Word و درج تصویر و فیلم با پلیر واکنش‌گرا.',
+    'برنامه راهبردی و بهبود هوشمند: تدوین خودکار اکشن پلن‌های ۱، ۳، ۶ و ۱۲ ماهه مبتنی بر ۵ رفرنس بالینی و خروجی Word.',
+    'تحلیل و گزارش‌دهی: مشاهده روند پیشرفت فردی و گروهی با نمودارهای تحلیلی و بصری.',
+    'ذخیره‌سازی و امنیت داده: پشتیبانی از ذخیره‌سازی ابری و دیتابیس سوپابیس و سی‌پنل.',
+  ],
+  closingPoem: 'ستایش خداوندِ بخشنده را\nکه موجود کرد از عدم بنده را',
+  creatorName: 'حسین نصاری',
+  creatorEmail: 'ho3in.n12@gmail.com',
+  aparatUrl: 'https://www.aparat.com/Amazing.Nurse/',
+  version: 'نسخه ۲.۵ (پاییز ۱۴۰۵)',
+};
+
+export const DEFAULT_APP_ICON = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="%232563eb"><rect width="100" height="100" rx="22" fill="%231e40af"/><path d="M50 20 L50 80 M20 50 L80 50" stroke="white" stroke-width="14" stroke-linecap="round"/><circle cx="50" cy="50" r="12" fill="%23f59e0b"/></svg>';
+
+export const getOfficersFromLocal = (): ProvincialOfficer[] => {
+  try {
+    const raw = localStorage.getItem('provincial_officers');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+export const saveOfficers = (officers: ProvincialOfficer[]) => {
+  localStorage.setItem('provincial_officers', JSON.stringify(officers));
+};
+
+export const getProvincesFromLocal = (hospitals: Hospital[] = []): string[] => {
+  try {
+    const raw = localStorage.getItem('app_provinces');
+    const stored: string[] = raw ? JSON.parse(raw) : [];
+    const set = new Set<string>([...stored, ...hospitals.map(h => h.province).filter(Boolean), ...DEFAULT_PROVINCES]);
+    return Array.from(set);
+  } catch {
+    return DEFAULT_PROVINCES;
+  }
+};
+
+export const saveProvinces = (provinces: string[]) => {
+  localStorage.setItem('app_provinces', JSON.stringify(provinces));
+};
+
+export const getArchivedArticlesFromLocal = (): ArchivedArticleTemplate[] => {
+  try {
+    const raw = localStorage.getItem('archived_training_articles');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+export const saveArchivedArticles = (articles: ArchivedArticleTemplate[]) => {
+  localStorage.setItem('archived_training_articles', JSON.stringify(articles));
+};
+
+export const getAboutInfoFromLocal = (): AppAboutInfo => {
+  try {
+    const raw = localStorage.getItem('app_about_info');
+    return raw ? JSON.parse(raw) : DEFAULT_ABOUT_INFO;
+  } catch {
+    return DEFAULT_ABOUT_INFO;
+  }
+};
+
+export const saveAboutInfo = (info: AppAboutInfo) => {
+  localStorage.setItem('app_about_info', JSON.stringify(info));
+};
+
+export const getAppIconFromLocal = (): string => {
+  try {
+    return localStorage.getItem('app_custom_icon_url') || DEFAULT_APP_ICON;
+  } catch {
+    return DEFAULT_APP_ICON;
+  }
+};
+
+export const updateDomFavicons = (iconUrl: string) => {
+  if (typeof document === 'undefined') return;
+  try {
+    let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      document.getElementsByTagName('head')[0].appendChild(link);
+    }
+    link.href = iconUrl;
+
+    let appleLink = document.querySelector("link[rel~='apple-touch-icon']") as HTMLLinkElement;
+    if (!appleLink) {
+      appleLink = document.createElement('link');
+      appleLink.rel = 'apple-touch-icon';
+      document.getElementsByTagName('head')[0].appendChild(appleLink);
+    }
+    appleLink.href = iconUrl;
+  } catch (e) {
+    console.error("Failed to update favicons in DOM", e);
+  }
+};
+
+export const saveAppIcon = (iconUrl: string) => {
+  localStorage.setItem('app_custom_icon_url', iconUrl);
+  updateDomFavicons(iconUrl);
+};
+
+/**
+ * Resolves login credentials to a user + role.
+ */
+export const findUser = async (
+  hospitals: Hospital[],
+  nationalId: string,
+  password: string,
+  hospitalId?: string
+): Promise<LoggedInUser | null> => {
+  const candidateHash = await sha256Hex(`${nationalId}:${password}`);
+  if (candidateHash === ADMIN_CREDENTIAL_HASH) {
     return { role: UserRole.Admin, name: 'ادمین کل' };
   }
-  for (const hospital of hospitals) {
-    if (hospital.supervisorNationalId === nationalId && hospital.supervisorPassword === password) {
-      return { role: UserRole.Supervisor, name: hospital.supervisorName || 'سوپروایزر', hospitalId: hospital.id };
+
+  // Check Provincial Officers (can log in without selecting a hospital)
+  const officers = getOfficersFromLocal();
+  const officer = officers.find(o => o.nationalId === nationalId && o.password === password);
+  if (officer) {
+    return {
+      role: UserRole.ProvincialOfficer,
+      name: officer.name,
+      province: officer.province,
+      officerId: officer.id,
+    };
+  }
+
+  if (!hospitalId) return null;
+  const hospital = hospitals.find(h => h.id === hospitalId);
+  if (!hospital) return null;
+
+  if (hospital.supervisorNationalId === nationalId && hospital.supervisorPassword === password) {
+    return { role: UserRole.Supervisor, name: hospital.supervisorName || 'سوپروایزر', hospitalId: hospital.id };
+  }
+  for (const department of hospital.departments) {
+    if (department.managerNationalId === nationalId && department.managerPassword === password) {
+      return { role: UserRole.Manager, name: department.managerName, hospitalId: hospital.id, departmentId: department.id };
     }
-    for (const department of hospital.departments) {
-      if (department.managerNationalId === nationalId && department.managerPassword === password) {
-        return { role: UserRole.Manager, name: department.managerName, hospitalId: hospital.id, departmentId: department.id };
+    for (const staff of department.staff) {
+      if (staff.nationalId === nationalId && staff.password === password) {
+        return { role: UserRole.Staff, name: staff.name, hospitalId: hospital.id, departmentId: department.id, staffId: staff.id };
       }
-      for (const staff of department.staff) {
-        if (staff.nationalId === nationalId && staff.password === password) {
-          return { role: UserRole.Staff, name: staff.name, hospitalId: hospital.id, departmentId: department.id, staffId: staff.id };
-        }
-      }
-      for (const patient of department.patients || []) {
-        if (patient.nationalId === nationalId && patient.password === password) {
-          return { role: UserRole.Patient, name: patient.name, hospitalId: hospital.id, departmentId: department.id, patientId: patient.id };
-        }
+    }
+    for (const patient of department.patients || []) {
+      if (patient.nationalId === nationalId && patient.password === password) {
+        return { role: UserRole.Patient, name: patient.name, hospitalId: hospital.id, departmentId: department.id, patientId: patient.id };
       }
     }
   }
