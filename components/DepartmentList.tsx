@@ -15,10 +15,11 @@ import { CalendarIcon } from './icons/CalendarIcon';
 import { SaveIcon } from './icons/SaveIcon';
 import { UploadIcon } from './icons/UploadIcon';
 import { ClipboardDocumentListIcon } from './icons/ClipboardDocumentListIcon';
+import { ChartBarIcon } from './icons/ChartBarIcon';
 import { AiIcon } from './icons/AiIcon';
 import { BackIcon } from './icons/BackIcon';
 import PeriodicPlanModal from './PeriodicPlanModal';
-import { generatePeriodicPlanWithAI } from '../services/geminiService';
+import { generatePeriodicPlanWithAI, DepartmentSummaryForHospital } from '../services/geminiService';
 
 interface DepartmentListProps {
   hospital: Hospital;
@@ -31,6 +32,7 @@ interface DepartmentListProps {
   onManageNewsBanners: () => void;
   onManageNeedsAssessment: () => void;
   onManageCorrectiveActions: () => void;
+  onManageSensitiveIndicators: () => void;
   onResetHospital: (supervisorNationalId: string) => Promise<boolean>;
   onContactAdmin: () => void;
   onArchiveYear: (yearToArchive: number) => void;
@@ -49,6 +51,7 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
   onManageNewsBanners,
   onManageNeedsAssessment,
   onManageCorrectiveActions,
+  onManageSensitiveIndicators,
   onResetHospital,
   onContactAdmin,
   onArchiveYear,
@@ -93,6 +96,7 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
     setHospitalPlanContent(null);
 
     try {
+      const departmentsData: DepartmentSummaryForHospital[] = [];
       let totalAssessedStaff = 0;
       let totalItems = 0;
       let totalScoreSum = 0;
@@ -103,15 +107,29 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
       let commItems = 0;
       let commScoreSum = 0;
 
-      const skillMap = new Map<string, { categoryName: string; totalScore: number; count: number }>();
+      const skillMap = new Map<string, { categoryName: string; totalScore: number; count: number; radif?: number; referenceText?: string }>();
 
       (hospital.departments || []).forEach(dep => {
+        let depAssessedStaffCount = 0;
+        let depTotalScoreSum = 0;
+        let depTotalItems = 0;
+        let depGenSum = 0, depGenItems = 0;
+        let depSpecSum = 0, depSpecItems = 0;
+        let depCommSum = 0, depCommItems = 0;
+
+        const depSkillMap = new Map<string, { name: string; category: string; totalScore: number; count: number; weakCount: number }>();
+        const staffScores: Array<{ name: string; title: string; overallAvg: number }> = [];
+
         (dep.staff || []).forEach(staff => {
           const staffAssessments = staff.assessments || [];
           if (staffAssessments.length > 0) {
+            depAssessedStaffCount++;
             totalAssessedStaff++;
             const latestAss = staffAssessments[staffAssessments.length - 1];
             const maxScore = latestAss.maxScore ?? 4;
+
+            let stScoreSum = 0;
+            let stItemsCount = 0;
 
             (latestAss.skillCategories || []).forEach(cat => {
               const isGeneral = cat.name.includes('عمومی');
@@ -125,13 +143,26 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
                 const radif = item.radif || (itemIdx + 1);
                 const desc = item.description || (item as any).name || '';
                 const refText = `مهارت شماره ${radif} از ${catShort}`;
+
                 totalItems++;
                 totalScoreSum += normalizedScore;
+                depTotalItems++;
+                depTotalScoreSum += normalizedScore;
+                stItemsCount++;
+                stScoreSum += normalizedScore;
 
-                if (isGeneral) { genItems++; genScoreSum += normalizedScore; }
-                else if (isSpecial) { specItems++; specScoreSum += normalizedScore; }
-                else if (isComm) { commItems++; commScoreSum += normalizedScore; }
+                if (isGeneral) {
+                  genItems++; genScoreSum += normalizedScore;
+                  depGenItems++; depGenSum += normalizedScore;
+                } else if (isSpecial) {
+                  specItems++; specScoreSum += normalizedScore;
+                  depSpecItems++; depSpecSum += normalizedScore;
+                } else if (isComm) {
+                  commItems++; commScoreSum += normalizedScore;
+                  depCommItems++; depCommSum += normalizedScore;
+                }
 
+                // Hospital-wide map
                 const existing = skillMap.get(desc);
                 if (existing) {
                   existing.totalScore += normalizedScore;
@@ -145,9 +176,80 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
                     referenceText: refText
                   });
                 }
+
+                // Department map
+                const isWeak = normalizedScore < 2.8; // score < 70%
+                const dExisting = depSkillMap.get(desc);
+                if (dExisting) {
+                  dExisting.totalScore += normalizedScore;
+                  dExisting.count += 1;
+                  if (isWeak) dExisting.weakCount += 1;
+                } else {
+                  depSkillMap.set(desc, {
+                    name: desc,
+                    category: catShort,
+                    totalScore: normalizedScore,
+                    count: 1,
+                    weakCount: isWeak ? 1 : 0
+                  });
+                }
               });
             });
+
+            const staffOverallAvg = stItemsCount > 0 ? Math.round((stScoreSum / (stItemsCount * 4)) * 100) : 0;
+            staffScores.push({
+              name: staff.name,
+              title: staff.title || 'کارشناس پرستاری',
+              overallAvg: staffOverallAvg
+            });
           }
+        });
+
+        // Sort staff by overall score descending to designate top performers / preceptors
+        staffScores.sort((a, b) => b.overallAvg - a.overallAvg);
+        const topStaff = staffScores.slice(0, 3);
+
+        const depOverallAvg = depTotalItems > 0 ? Math.round((depTotalScoreSum / (depTotalItems * 4)) * 100) : 80;
+        const depGenAvg = depGenItems > 0 ? Math.round((depGenSum / (depGenItems * 4)) * 100) : 80;
+        const depSpecAvg = depSpecItems > 0 ? Math.round((depSpecSum / (depSpecItems * 4)) * 100) : 80;
+        const depCommAvg = depCommItems > 0 ? Math.round((depCommSum / (depCommItems * 4)) * 100) : 80;
+
+        // Calculate skill percentages for department
+        const depSkills = Array.from(depSkillMap.values()).map(s => {
+          const avgScore = s.count > 0 ? s.totalScore / s.count : 0;
+          const scorePct = Math.round((avgScore / 4) * 100);
+          return {
+            name: s.name,
+            category: s.category,
+            scorePct,
+            count: s.weakCount || (scorePct < 75 ? s.count : 0)
+          };
+        });
+
+        // Sort ascending for weak skills (lowest score first)
+        const sortedAsc = [...depSkills].sort((a, b) => a.scorePct - b.scorePct);
+        const weakSkills = sortedAsc.filter(s => s.scorePct < 80).slice(0, 5);
+        if (weakSkills.length === 0 && sortedAsc.length > 0) {
+          weakSkills.push(...sortedAsc.slice(0, 2));
+        }
+
+        // Sort descending for top skills (highest score first)
+        const sortedDesc = [...depSkills].sort((a, b) => b.scorePct - a.scorePct);
+        const topSkills = sortedDesc.filter(s => s.scorePct >= 85).slice(0, 5);
+
+        departmentsData.push({
+          id: dep.id,
+          name: dep.name,
+          managerName: dep.managerName || 'سرپرستار بخش',
+          staffCount: dep.staff?.length || 0,
+          evaluatedStaffCount: depAssessedStaffCount,
+          overallAvg: depOverallAvg,
+          genAvg: depGenAvg,
+          specAvg: depSpecAvg,
+          commAvg: depCommAvg,
+          weakSkills,
+          topSkills,
+          topStaff
         });
       });
 
@@ -185,10 +287,13 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
         specAvg: sAvg,
         commAvg: cAvg,
         totalStaffCount: totalAssessedStaff,
-        skillsSummary
+        skillsSummary,
+        departmentsData,
+        activeYear: 1405
       });
 
-      setHospitalPlanContent(res.plan);
+      const planText = typeof res === 'string' ? res : (res as any)?.plan || 'برنامه‌ای دریافت نشد.';
+      setHospitalPlanContent(planText);
     } catch (err) {
       console.error('Failed to generate hospital strategic plan:', err);
       setHospitalPlanContent('خطا در دریافت برنامه راهبردی کل بیمارستان. لطفاً مجدداً تلاش فرمایید.');
@@ -309,12 +414,11 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
         }
     };
 
-    const baseButtonClass = "inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-lg shadow-md transition-transform transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2";
-
+    const baseBtnClass = "flex items-center justify-center gap-2 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-white rounded-xl shadow-sm transition-all hover:shadow-md active:scale-98 text-center";
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
-      <div className="flex flex-wrap justify-between items-center mb-6 gap-4">
+    <div className="p-3 sm:p-6 lg:p-8">
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4">
         <div className="flex items-center gap-3">
           {userRole === UserRole.Admin && (
             <button
@@ -326,85 +430,106 @@ const DepartmentList: React.FC<DepartmentListProps> = ({
               <span>بازگشت به لیست بیمارستان‌ها</span>
             </button>
           )}
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100">
-            بخش های بیمارستان: <span className="text-slate-600 dark:text-slate-400">{hospital.name}</span>
+          <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-900 dark:text-slate-100">
+            بخش‌های بیمارستان: <span className="text-slate-600 dark:text-slate-400">{hospital.name}</span>
           </h1>
         </div>
-        <div className="flex items-center gap-2 flex-wrap justify-end">
+
+        {/* Action Buttons: Responsive Grid on Mobile, Flex on Desktop */}
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2 w-full lg:w-auto justify-end">
+          {/* Hero Strategic Plan Button */}
+          <button
+            onClick={handleOpenHospitalStrategicPlan}
+            className={`${baseBtnClass} col-span-2 sm:col-auto bg-gradient-to-r from-indigo-700 via-blue-700 to-indigo-800 hover:from-indigo-800 hover:to-blue-900 shadow-md border border-indigo-400/30 text-white`}
+            title="تحلیل جامع هوش مصنوعی و تدوین برنامه راهبردی کل بیمارستان"
+          >
+            <AiIcon className="w-4 h-4 sm:w-5 sm:h-5 text-amber-300 animate-pulse shrink-0" />
+            <span>برنامه راهبردی کل بیمارستان (هوش مصنوعی)</span>
+          </button>
+
+          {/* Add New Department Button */}
+          <button
+            onClick={handleOpenAddModal}
+            className={`${baseBtnClass} col-span-2 sm:col-auto bg-blue-600 hover:bg-blue-700 focus:ring-blue-500`}
+          >
+            <PlusIcon className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+            <span>افزودن بخش جدید</span>
+          </button>
+
+          {/* Sensitive Clinical Indicators Button - Located right above Corrective Actions */}
+          <button
+            onClick={onManageSensitiveIndicators}
+            className={`${baseBtnClass} col-span-2 sm:col-auto bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white shadow-md border border-purple-400/30`}
+            title="پایش شاخص‌های حساس بیمارستانی (۱۳ شیت)، نمودارها و تحلیل هوش مصنوعی"
+          >
+            <ChartBarIcon className="w-4 h-4 sm:w-5 sm:h-5 shrink-0 text-amber-300" />
+            <span className="font-black">شاخص‌های حساس</span>
+          </button>
+
+          {/* Action Pairs in 2-column grid */}
+          <button
+            onClick={onManageCorrectiveActions}
+            className={`${baseBtnClass} col-span-1 sm:col-auto bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-500`}
+          >
+            <ClipboardDocumentListIcon className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+            <span>اقدامات اصلاحی</span>
+          </button>
+
+          <button
+            onClick={onManageAccreditation}
+            className={`${baseBtnClass} col-span-1 sm:col-auto bg-green-600 hover:bg-green-700 focus:ring-green-500`}
+          >
+            <ShieldCheckIcon className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+            <span>مطالب اعتباربخشی</span>
+          </button>
+
+          {(userRole === UserRole.Supervisor || userRole === UserRole.Admin) && (
             <button
-              onClick={handleOpenHospitalStrategicPlan}
-              className={`${baseButtonClass} bg-gradient-to-r from-indigo-700 via-blue-700 to-indigo-800 hover:from-indigo-800 hover:to-blue-900 text-white shadow-md border border-indigo-400/30`}
-              title="تحلیل جامع هوش مصنوعی و تدوین برنامه راهبردی کل بیمارستان"
+              onClick={onManageNeedsAssessment}
+              className={`${baseBtnClass} col-span-1 sm:col-auto bg-yellow-500 hover:bg-yellow-600 focus:ring-yellow-400`}
             >
-              <AiIcon className="w-5 h-5 text-amber-300" />
-              برنامه راهبردی کل بیمارستان (هوش مصنوعی)
+              <LightbulbIcon className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+              <span>نیازسنجی و نظرسنجی</span>
             </button>
-            {(userRole === UserRole.Supervisor || userRole === UserRole.Admin) && (
-              <>
-                 <button
-                    onClick={handleOpenArchiveModal}
-                    className={`${baseButtonClass} bg-gray-700 hover:bg-gray-800 focus:ring-gray-500`}
-                  >
-                    <CalendarIcon className="w-5 h-5" />
-                    بایگانی و شروع سال جدید
-                  </button>
-                  <button
-                    onClick={onManageNeedsAssessment}
-                    className={`${baseButtonClass} bg-yellow-500 hover:bg-yellow-600 focus:ring-yellow-400`}
-                  >
-                    <LightbulbIcon className="w-5 h-5" />
-                    نیازسنجی و نظرسنجی
-                  </button>
-              </>
-            )}
-            {userRole === UserRole.Supervisor && (
-              <button
-                onClick={onContactAdmin}
-                className={`${baseButtonClass} bg-purple-600 hover:bg-purple-700 focus:ring-purple-500`}
-              >
-                <ChatIcon className="w-5 h-5" />
-                تماس با ادمین کل
-              </button>
-            )}
+          )}
+
+          <button
+            onClick={onManageNewsBanners}
+            className={`${baseBtnClass} col-span-1 sm:col-auto bg-cyan-600 hover:bg-cyan-700 focus:ring-cyan-500`}
+          >
+            <NewspaperIcon className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+            <span>افزودن بنرهای خبری</span>
+          </button>
+
+          {(userRole === UserRole.Supervisor || userRole === UserRole.Admin) && (
             <button
-              onClick={onManageCorrectiveActions}
-              className={`${baseButtonClass} bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-500`}
+              onClick={handleOpenArchiveModal}
+              className={`${baseBtnClass} col-span-1 sm:col-auto bg-slate-700 hover:bg-slate-800 focus:ring-slate-500`}
             >
-              <ClipboardDocumentListIcon className="w-5 h-5" />
-              اقدامات اصلاحی
+              <CalendarIcon className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+              <span>بایگانی سال جدید</span>
             </button>
+          )}
+
+          {(userRole === UserRole.Admin || userRole === UserRole.Supervisor) && (
             <button
-              onClick={onManageNewsBanners}
-              className={`${baseButtonClass} bg-cyan-500 hover:bg-cyan-600 focus:ring-cyan-400`}
+              onClick={handleOpenResetModal}
+              className={`${baseBtnClass} col-span-1 sm:col-auto bg-rose-600 hover:bg-rose-700 focus:ring-rose-500`}
             >
-              <NewspaperIcon className="w-5 h-5" />
-              افزودن بنرهای خبری
+              <RefreshIcon className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+              <span>ریست بیمارستان</span>
             </button>
+          )}
+
+          {userRole === UserRole.Supervisor && (
             <button
-              onClick={onManageAccreditation}
-              className={`${baseButtonClass} bg-green-600 hover:bg-green-700 focus:ring-green-500`}
+              onClick={onContactAdmin}
+              className={`${baseBtnClass} col-span-2 sm:col-auto bg-purple-600 hover:bg-purple-700 focus:ring-purple-500`}
             >
-              <ShieldCheckIcon className="w-5 h-5" />
-              مطالب اعتباربخشی
+              <ChatIcon className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+              <span>تماس با ادمین کل</span>
             </button>
-            {(userRole === UserRole.Admin || userRole === UserRole.Supervisor) && (
-              <>
-                <button
-                  onClick={handleOpenResetModal}
-                  className={`${baseButtonClass} bg-red-600 hover:bg-red-700 focus:ring-red-500`}
-                >
-                  <RefreshIcon className="w-5 h-5" />
-                  ریست کردن بیمارستان
-                </button>
-              </>
-            )}
-            <button
-              onClick={handleOpenAddModal}
-              className={`${baseButtonClass} bg-blue-600 hover:bg-blue-700 focus:ring-blue-500`}
-            >
-              <PlusIcon className="w-5 h-5" />
-              افزودن بخش جدید
-            </button>
+          )}
         </div>
       </div>
 

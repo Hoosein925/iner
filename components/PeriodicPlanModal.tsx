@@ -7,9 +7,11 @@ interface PeriodicPlanModalProps {
   isOpen: boolean;
   onClose: () => void;
   title: string;
-  targetName: string;
-  departmentName: string;
-  roleDescription: string;
+  targetName?: string;
+  targetTitle?: string;
+  departmentName?: string;
+  hospitalName?: string;
+  roleDescription?: string;
   content: string | null;
   isLoading: boolean;
   onRegenerate?: () => void;
@@ -19,6 +21,7 @@ interface PeriodicPlanModalProps {
   commAvg?: number;
   totalStaffCount?: number;
   activeYear?: number;
+  mode?: 'hospital' | 'department' | 'staff';
 }
 
 export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
@@ -26,7 +29,9 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
   onClose,
   title,
   targetName,
-  departmentName,
+  targetTitle,
+  departmentName = '',
+  hospitalName = '',
   roleDescription,
   content,
   isLoading,
@@ -37,6 +42,7 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
   commAvg = 80,
   totalStaffCount,
   activeYear,
+  mode = 'department',
 }) => {
   const contentRef = useRef<HTMLDivElement>(null);
   const [copyStatus, setCopyStatus] = useState<string>('کپی متن');
@@ -45,6 +51,9 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
   const [isAsking, setIsAsking] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'full' | 'summary' | 'axes' | 'action' | 'individual' | 'causes' | 'timeline'>('full');
   const [isExportingWord, setIsExportingWord] = useState<boolean>(false);
+
+  const effectiveTargetName = targetName || targetTitle || hospitalName || departmentName || 'مرکز آموزشی درمانی';
+  const effectiveRoleDescription = roleDescription || (mode === 'hospital' ? 'سوپروایزر آموزشی / مدیر بیمارستان' : 'سرپرستار بخش');
 
   if (!isOpen) return null;
 
@@ -55,9 +64,9 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
       const { exportPeriodicPlanToDocx } = await import('../services/wordExportService');
       await exportPeriodicPlanToDocx({
         title,
-        targetName,
-        departmentName,
-        roleDescription,
+        targetName: effectiveTargetName,
+        departmentName: departmentName || hospitalName || 'کلیه بخش‌ها',
+        roleDescription: effectiveRoleDescription,
         overallAvg,
         content,
         activeYear,
@@ -90,7 +99,7 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
     const q = userQuery;
     try {
       const ans = await askCustomQuestionWithAI({
-        contextName: `${title} - ${targetName}`,
+        contextName: `${title} - ${effectiveTargetName}`,
         evaluatedStaffCount: totalStaffCount || 1,
         overallAvg,
         genAvg,
@@ -124,12 +133,14 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
     return matched.length > 0 ? matched.join('\n\n') : '';
   };
 
-  const summaryText = extractSection(['خلاصه مدیریتی', 'شرح کلی وضعیت', 'وضعیت کلی ارزیابی']);
-  const axesText = extractSection(['محورهای اصلاحی', 'حیطه‌ها', 'سنجه‌ها']);
-  const actionText = extractSection(['برنامه جامع اقدامات', 'برنامه کامل اقدامات', 'برنامه ۱ ماهه', 'برنامه ۳ ماهه']);
-  const individualText = extractSection(['برنامه بهبود فردی', 'آموزش فردی', 'هدایت بالینی']);
+  const isHospital = mode === 'hospital';
+
+  const summaryText = extractSection(['شرح وضعیت بخش‌های بیمارستان', 'خلاصه مدیریتی', 'شرح کلی وضعیت', 'وضعیت کلی ارزیابی']);
+  const axesText = extractSection(['شناسایی و کالبدشکافی بیشترین نقاط ضعف', 'نقاط ضعف مهارتی', 'محورهای اصلاحی', 'حیطه‌ها', 'سنجه‌ها']);
+  const actionText = extractSection(['جدول برنامه عملیاتی استراتژیک', 'برنامه عملیاتی', 'برنامه جامع اقدامات', 'برنامه کامل اقدامات', 'برنامه ۱ ماهه', 'برنامه ۳ ماهه']);
+  const individualText = extractSection(['ماتریس نقش‌ها و شرح وظایف', 'اشخاص پیگیرکننده', 'برنامه بهبود فردی', 'آموزش فردی', 'هدایت بالینی']);
   const causesText = extractSection(['علل مستند', 'فرضیه‌ها', 'بررسی میدانی', 'کنترل کیفیت']);
-  const timelineText = extractSection(['زمان‌بندی و مسئولیت', 'صفحه تأیید', 'تأیید و امضا', 'برنامه ۱ ساله']);
+  const timelineText = extractSection(['سازوکار نظارت، پایش دوره‌ای', 'سازوکار نظارت', 'پایش دوره‌ای', 'زمان‌بندی و مسئولیت', 'صفحه تأیید', 'تأیید و امضا', 'برنامه ۱ ساله']);
 
   const displayedContent = () => {
     switch (activeTab) {
@@ -186,29 +197,35 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
           );
 
           elements.push(
-            <div key={`tbl-${i}`} className="my-4 overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm bg-white dark:bg-slate-800">
-              <table className="w-full text-right text-xs border-collapse min-w-[650px]">
-                <thead>
-                  <tr className="bg-slate-100 dark:bg-slate-750 border-b border-slate-200 dark:border-slate-700">
-                    {headerCells.map((h, hIdx) => (
-                      <th key={hIdx} className="p-2.5 font-bold text-slate-800 dark:text-slate-200 whitespace-nowrap border-l border-slate-250 dark:border-slate-700 last:border-l-0">
-                        {renderBold(h)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-150 dark:divide-slate-700/60">
-                  {dataRows.map((row, rIdx) => (
-                    <tr key={rIdx} className="hover:bg-slate-50 dark:hover:bg-slate-750/50 transition">
-                      {row.map((cell, cIdx) => (
-                        <td key={cIdx} className="p-2 text-slate-700 dark:text-slate-300 border-l border-slate-200/60 dark:border-slate-700/60 last:border-l-0">
-                          {renderBold(cell)}
-                        </td>
+            <div key={`tbl-${i}`} className="my-3 sm:my-4 space-y-1">
+              <div className="text-[10px] text-slate-400 dark:text-slate-500 sm:hidden flex items-center justify-between px-1">
+                <span>← برای مشاهده تمام ستون‌ها به چپ بکشید →</span>
+                <span>جدول برنامه</span>
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 shadow-xs bg-white dark:bg-slate-800">
+                <table className="w-full text-right text-xs border-collapse min-w-[600px]">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-750 border-b border-slate-200 dark:border-slate-700">
+                      {headerCells.map((h, hIdx) => (
+                        <th key={hIdx} className="p-2 sm:p-2.5 font-bold text-slate-800 dark:text-slate-200 whitespace-nowrap border-l border-slate-250 dark:border-slate-700 last:border-l-0">
+                          {renderBold(h)}
+                        </th>
                       ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-150 dark:divide-slate-700/60">
+                    {dataRows.map((row, rIdx) => (
+                      <tr key={rIdx} className="hover:bg-slate-50 dark:hover:bg-slate-750/50 transition">
+                        {row.map((cell, cIdx) => (
+                          <td key={cIdx} className="p-2 text-slate-700 dark:text-slate-300 border-l border-slate-200/60 dark:border-slate-700/60 last:border-l-0">
+                            {renderBold(cell)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           );
           continue;
@@ -286,76 +303,103 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/70 backdrop-blur-sm overflow-y-auto animate-fadeIn">
-      <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden text-right font-sans">
+    <div className="fixed inset-0 z-50 flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 bg-slate-950/85 backdrop-blur-sm overflow-hidden animate-fadeIn">
+      <div className="w-full max-w-5xl h-full sm:h-auto sm:max-h-[92vh] bg-white dark:bg-slate-900 rounded-none sm:rounded-3xl shadow-2xl sm:border border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden text-right font-sans">
         
-        {/* Header */}
-        <div className="p-4 sm:p-6 bg-gradient-to-r from-blue-700 via-indigo-700 to-teal-700 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shrink-0 shadow-md">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-white/15 backdrop-blur-md rounded-2xl border border-white/20 shadow-inner">
-              <AiIcon className="w-8 h-8 text-amber-300 animate-pulse" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-900 shadow-sm">
-                  هوش مصنوعی بالینی
-                </span>
-                <span className="text-xs text-blue-100 opacity-90">
-                  مبتنی بر ۵ رفرنس رسمی بالینی و اعتباربخشی
-                </span>
+        {/* Header (No truncation, fully readable on mobile and desktop) */}
+        <div className="p-3.5 sm:p-5 bg-gradient-to-r from-blue-700 via-indigo-700 to-teal-700 text-white shrink-0 shadow-md">
+          {/* Top Row: Badges & Action Buttons */}
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 sm:p-2 bg-white/15 backdrop-blur-md rounded-xl border border-white/20 shadow-inner shrink-0">
+                <AiIcon className="w-5 h-5 sm:w-6 sm:h-6 text-amber-300 animate-pulse" />
               </div>
-              <h2 className="text-lg sm:text-2xl font-black mt-1 text-white tracking-tight">
-                {title}
-              </h2>
-              <p className="text-xs sm:text-sm text-blue-100 opacity-90 mt-0.5">
-                {targetName} | {departmentName} {totalStaffCount ? `(${totalStaffCount} نفر پرسنل)` : ''}
-              </p>
+              <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 shadow-xs">
+                هوش مصنوعی بالینی
+              </span>
+              <span className="text-[10px] text-blue-100 opacity-90 hidden sm:inline">
+                مبتنی بر استانداردهای ۵ رفرنس بالینی و اعتباربخشی
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              {onRegenerate && !isLoading && (
+                <button
+                  onClick={onRegenerate}
+                  className="px-2.5 py-1.5 bg-white/15 hover:bg-white/25 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 border border-white/20"
+                  title="بازتولید تحلیل با مدل هوش مصنوعی"
+                >
+                  <span>🔄</span>
+                  <span className="hidden sm:inline">به‌روزرسانی</span>
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="p-1.5 text-white/80 hover:text-white hover:bg-white/20 rounded-xl transition"
+                aria-label="بستن"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
           </div>
 
-          {/* Top Quick Actions */}
-          <div className="flex items-center gap-2 self-end sm:self-center">
-            {onRegenerate && !isLoading && (
-              <button
-                onClick={onRegenerate}
-                className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-white/20"
-                title="بازتولید تحلیل با مدل هوش مصنوعی"
-              >
-                <span>🔄</span>
-                <span>به‌روزرسانی</span>
-              </button>
-            )}
-            <button
-              onClick={onClose}
-              className="p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-xl transition"
-              aria-label="بستن"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+          {/* Full Title Row (NEVER TRUNCATED) */}
+          <div className="space-y-1">
+            <h2 className="text-sm sm:text-xl font-black text-white leading-snug break-words">
+              {title}
+            </h2>
+            <p className="text-[11px] sm:text-xs text-blue-100/90 break-words">
+              {effectiveTargetName} {departmentName ? `| ${departmentName}` : ''} {totalStaffCount ? `(${totalStaffCount} نفر پرسنل ارزیابی‌شده)` : ''}
+            </p>
           </div>
         </div>
 
-        {/* Clinical Reference Badge Strip */}
-        <div className="bg-slate-100 dark:bg-slate-800/80 px-4 py-2 border-b border-slate-200 dark:border-slate-700/60 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600 dark:text-slate-300">
-          <div className="flex flex-wrap items-center gap-1.5 font-bold text-teal-700 dark:text-teal-400">
+        {/* Clinical Reference Badge Strip (Responsive) */}
+        <div className="bg-slate-100 dark:bg-slate-800/95 px-3 sm:px-4 py-2 border-b border-slate-200 dark:border-slate-700/60 flex flex-wrap items-center justify-between gap-1.5 text-[11px] text-slate-600 dark:text-slate-300 shrink-0">
+          <div className="flex items-center gap-1.5 font-bold text-teal-700 dark:text-teal-400">
             <span>🏛️ دستورالعمل رسمی:</span>
-            <span>راهنمای چک‌لیست مهارت‌های عملکردی پرستاری - معاونت درمان دانشگاه علوم پزشکی جندی شاپور اهواز (تابستان ۱۴۰۵)</span>
+            <span className="truncate">راهنمای چک‌لیست مهارت‌های عملکردی پرستاری (تابستان ۱۴۰۵)</span>
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-slate-500 dark:text-slate-400">
-            <span className="px-2 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300 font-semibold">🔴 بحرانی: &lt;۶۵٪</span>
-            <span className="px-2 py-0.5 rounded bg-orange-100 text-orange-700 dark:bg-orange-950/50 dark:text-orange-300 font-semibold">🟠 متوسط: ۶۵-۷۴٪</span>
-            <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 font-semibold">🟡 در حال رشد: ۷۵-۸۴٪</span>
-            <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 font-semibold">🟢 ایمن/مستقل: ≥۸۵٪</span>
-            <span className="border-r border-slate-300 dark:border-slate-600 pr-2 mr-1">
-              کل: <strong className="text-indigo-600 dark:text-indigo-400">{overallAvg}٪</strong> | عمومی: <strong>{genAvg}٪</strong> | اختصاصی: <strong>{specAvg}٪</strong> | ارتباطی: <strong>{commAvg}٪</strong>
+          <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold">
+            <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300">🔴 &lt;۶۵٪</span>
+            <span className="px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 dark:bg-orange-950/60 dark:text-orange-300">🟠 ۶۵-۷۴٪</span>
+            <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">🟡 ۷۵-۸۴٪</span>
+            <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">🟢 ≥۸۵٪</span>
+            <span className="border-r border-slate-300 dark:border-slate-600 pr-1.5 mr-0.5 text-indigo-700 dark:text-indigo-400 font-black">
+              میانگین: {overallAvg}٪
             </span>
           </div>
         </div>
 
-        {/* View Tabs */}
-        <div className="flex items-center gap-1 sm:gap-2 px-4 pt-3 pb-1 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-850 overflow-x-auto text-xs sm:text-sm font-semibold">
+        {/* Mobile Options Selector (Ensures ALL options are 100% visible and easy to choose on mobile) */}
+        <div className="sm:hidden px-3 py-2 bg-indigo-50 dark:bg-slate-850 border-b border-indigo-200 dark:border-slate-700 shrink-0">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <span className="text-[11px] font-black text-indigo-950 dark:text-indigo-200">
+              📌 انتخاب بخش برنامه راهبردی:
+            </span>
+            <span className="text-[10px] text-slate-500 dark:text-slate-400">
+              (لمس کنید برای انتخاب گزینه)
+            </span>
+          </div>
+          <select
+            value={activeTab}
+            onChange={e => setActiveTab(e.target.value as any)}
+            className="w-full py-2.5 px-3 text-xs font-black bg-white dark:bg-slate-800 text-indigo-950 dark:text-indigo-100 border-2 border-indigo-400 dark:border-indigo-600 rounded-xl shadow-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+          >
+            <option value="full">{isHospital ? '📋 گزارش جامع راهبردی کل بیمارستان' : '📋 گزارش کامل (۱۰ بخش)'}</option>
+            <option value="summary">{isHospital ? '📊 ۱. شرح وضعیت بخش‌های بیمارستان' : '📊 ۱. خلاصه مدیریتی و وضعیت'}</option>
+            <option value="axes">{isHospital ? '🔍 ۲. بیشترین نقاط ضعف بخش‌ها' : '🎯 ۲. محورهای اصلاحی و سنجه‌ها'}</option>
+            <option value="action">{isHospital ? '📅 ۳. جدول برنامه عملیاتی (Action Plan)' : '⚡ ۳. ماتریس اقدامات (۵ رُکنی)'}</option>
+            <option value="individual">{isHospital ? '👥 ۴. اشخاص پیگیرکننده و شرح وظایف' : '👤 ۴. بهبود فردی پرسنل'}</option>
+            {!isHospital && <option value="causes">🔍 ۵. علل، فرضیه‌ها و بررسی میدانی</option>}
+            <option value="timeline">{isHospital ? '📈 ۵. پایش و کنترل کیفیت دوره‌ای' : '📅 ۶. زمان‌بندی و تأییدیه'}</option>
+          </select>
+        </div>
+
+        {/* Desktop / Tablet View Tabs */}
+        <div className="hidden sm:flex items-center gap-1 sm:gap-2 px-4 pt-3 pb-1 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-850 overflow-x-auto text-xs sm:text-sm font-semibold shrink-0">
           <button
             onClick={() => setActiveTab('full')}
             className={`px-3 py-2 rounded-t-xl transition border-b-2 whitespace-nowrap ${
@@ -364,7 +408,7 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
                 : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
-            📋 گزارش کامل (۱۰ بخش)
+            {isHospital ? '📋 گزارش جامع راهبردی' : '📋 گزارش کامل (۱۰ بخش)'}
           </button>
           <button
             onClick={() => setActiveTab('summary')}
@@ -374,7 +418,7 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
                 : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
-            📊 ۱. خلاصه مدیریتی و وضعیت
+            {isHospital ? '📊 ۱. شرح وضعیت بخش‌ها' : '📊 ۱. خلاصه مدیریتی و وضعیت'}
           </button>
           <button
             onClick={() => setActiveTab('axes')}
@@ -384,7 +428,7 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
                 : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
-            🎯 ۲. محورهای اصلاحی و سنجه‌ها
+            {isHospital ? '🔍 ۲. بیشترین نقاط ضعف بخش‌ها' : '🎯 ۲. محورهای اصلاحی و سنجه‌ها'}
           </button>
           <button
             onClick={() => setActiveTab('action')}
@@ -394,7 +438,7 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
                 : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
-            ⚡ ۳. ماتریس اقدامات (۵ رُکنی)
+            {isHospital ? '📅 ۳. جدول برنامه عملیاتی (Action Plan)' : '⚡ ۳. ماتریس اقدامات (۵ رُکنی)'}
           </button>
           <button
             onClick={() => setActiveTab('individual')}
@@ -404,18 +448,20 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
                 : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
-            👤 ۴. بهبود فردی پرسنل
+            {isHospital ? '👥 ۴. اشخاص پیگیرکننده و شرح وظایف' : '👤 ۴. بهبود فردی پرسنل'}
           </button>
-          <button
-            onClick={() => setActiveTab('causes')}
-            className={`px-3 py-2 rounded-t-xl transition border-b-2 whitespace-nowrap ${
-              activeTab === 'causes'
-                ? 'border-indigo-600 text-indigo-700 dark:text-indigo-300 bg-white dark:bg-slate-900 shadow-sm'
-                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-            }`}
-          >
-            🔍 ۵. علل، فرضیه‌ها و بررسی
-          </button>
+          {!isHospital && (
+            <button
+              onClick={() => setActiveTab('causes')}
+              className={`px-3 py-2 rounded-t-xl transition border-b-2 whitespace-nowrap ${
+                activeTab === 'causes'
+                  ? 'border-indigo-600 text-indigo-700 dark:text-indigo-300 bg-white dark:bg-slate-900 shadow-sm'
+                  : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+              }`}
+            >
+              🔍 ۵. علل، فرضیه‌ها و بررسی
+            </button>
+          )}
           <button
             onClick={() => setActiveTab('timeline')}
             className={`px-3 py-2 rounded-t-xl transition border-b-2 whitespace-nowrap ${
@@ -424,12 +470,12 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
                 : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
-            📅 ۶. زمان‌بندی و تأییدیه
+            {isHospital ? '📈 ۵. پایش و کنترل کیفیت' : '📅 ۶. زمان‌بندی و تأییدیه'}
           </button>
         </div>
 
         {/* Content Body */}
-        <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-6" ref={contentRef}>
+        <div className="p-3 sm:p-6 overflow-y-auto overflow-x-hidden flex-1 space-y-5 w-full max-w-full" ref={contentRef}>
           {isLoading ? (
             <div className="flex flex-col items-center justify-center py-16 text-center space-y-4">
               <div className="relative">
@@ -448,7 +494,7 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
               </div>
             </div>
           ) : content ? (
-            <div className="bg-slate-50/70 dark:bg-slate-800/40 p-5 sm:p-7 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-3">
+            <div className="bg-slate-50/70 dark:bg-slate-800/40 p-3.5 sm:p-7 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-3 w-full max-w-full overflow-hidden">
               {formatMarkdown(displayedContent())}
             </div>
           ) : (
@@ -474,7 +520,7 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
                 </div>
               ))}
 
-              <form onSubmit={handleAskQuestion} className="flex gap-2 mt-4">
+              <form onSubmit={handleAskQuestion} className="flex flex-col sm:flex-row gap-2 mt-4">
                 <input
                   type="text"
                   value={userQuery}
@@ -486,7 +532,7 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
                 <button
                   type="submit"
                   disabled={isAsking || !userQuery.trim()}
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs sm:text-sm font-bold rounded-xl transition shadow flex items-center gap-1.5 whitespace-nowrap"
+                  className="w-full sm:w-auto px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs sm:text-sm font-bold rounded-xl transition shadow flex items-center justify-center gap-1.5 whitespace-nowrap"
                 >
                   {isAsking ? 'در حال تحلیل...' : 'ارسال پرسش'}
                 </button>
@@ -495,44 +541,46 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
           )}
         </div>
 
-        {/* Footer with Actions */}
-        <div className="p-4 bg-slate-100 dark:bg-slate-800/90 border-t border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3 shrink-0">
-          <div className="text-xs text-slate-500 dark:text-slate-400">
+        {/* Footer with Actions (Responsive) */}
+        <div className="p-3 sm:p-4 bg-slate-100 dark:bg-slate-850 border-t border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 shrink-0">
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:block">
             فایل خروجی منطبق بر استاندارد فرمت‌های رسمی اداری و وزارت بهداشت می‌باشد.
           </div>
 
-          <div className="flex items-center gap-2.5 flex-wrap">
-            <button
-              onClick={handleCopy}
-              className="px-4 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 text-xs sm:text-sm font-semibold rounded-xl transition shadow-sm"
-            >
-              {copyStatus}
-            </button>
-
-            <button
-              onClick={handlePrint}
-              className="px-4 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 text-xs sm:text-sm font-semibold rounded-xl transition shadow-sm flex items-center gap-1.5"
-            >
-              <span>🖨️</span>
-              <span>چاپ</span>
-            </button>
-
-            {/* Requested Word Download Button */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto justify-end">
+            {/* Word Download Button */}
             <button
               onClick={handleDownloadWord}
               disabled={!content || isLoading || isExportingWord}
-              className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 disabled:opacity-50 text-white text-xs sm:text-sm font-bold rounded-xl transition shadow-md flex items-center gap-2"
+              className="w-full sm:w-auto px-5 py-3 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 disabled:opacity-50 text-white text-xs sm:text-sm font-black rounded-xl transition shadow-md flex items-center justify-center gap-2"
             >
-              <DocumentIcon className="w-5 h-5 text-amber-300" />
+              <DocumentIcon className="w-4 h-4 sm:w-5 sm:h-5 text-amber-300" />
               <span>{isExportingWord ? 'در حال آماده‌سازی فایل ورد...' : '📥 دانلود فایل ورد (.docx)'}</span>
             </button>
 
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-slate-300 hover:bg-slate-400 dark:bg-slate-600 dark:hover:bg-slate-500 text-slate-800 dark:text-white text-xs sm:text-sm font-semibold rounded-xl transition"
-            >
-              بستن
-            </button>
+            <div className="flex items-center gap-2 justify-between">
+              <button
+                onClick={handleCopy}
+                className="flex-1 sm:flex-initial px-3.5 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-750 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold rounded-xl transition shadow-xs text-center"
+              >
+                {copyStatus}
+              </button>
+
+              <button
+                onClick={handlePrint}
+                className="flex-1 sm:flex-initial px-3.5 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-750 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold rounded-xl transition shadow-xs flex items-center justify-center gap-1"
+              >
+                <span>🖨️</span>
+                <span>چاپ</span>
+              </button>
+
+              <button
+                onClick={onClose}
+                className="flex-1 sm:flex-initial px-4 py-2 bg-slate-300 hover:bg-slate-400 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-900 dark:text-white text-xs font-bold rounded-xl transition text-center"
+              >
+                بستن
+              </button>
+            </div>
           </div>
         </div>
 

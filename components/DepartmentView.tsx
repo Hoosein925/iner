@@ -103,6 +103,7 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
   const [deptGenAvg, setDeptGenAvg] = useState(80);
   const [deptSpecAvg, setDeptSpecAvg] = useState(80);
   const [deptCommAvg, setDeptCommAvg] = useState(80);
+  const [deptStaffDetails, setDeptStaffDetails] = useState<any[]>([]);
 
   const handleOpenDepartmentPeriodicPlan = async () => {
     setIsPeriodicPlanModalOpen(true);
@@ -217,14 +218,22 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
 
         let stTotal = 0;
         let stCount = 0;
+        let genScore = 0;
+        let genCount = 0;
+        let specScore = 0;
+        let specCount = 0;
+        let commScore = 0;
+        let commCount = 0;
         const stWeak: { skillName: string; radif: number; categoryName: string; score: number; referenceText: string }[] = [];
         const stExpert: { skillName: string; radif: number; categoryName: string; score: number; referenceText: string }[] = [];
 
         if (latestAss) {
           (latestAss.skillCategories || []).forEach(cat => {
-            const catShort = cat.name.includes('عمومی')
+            const isGeneral = cat.name.includes('عمومی');
+            const isComm = cat.name.includes('ارتباط') || cat.name.includes('حقوق') || cat.name.includes('اخلاق');
+            const catShort = isGeneral
               ? 'مهارت‌های عمومی'
-              : cat.name.includes('ارتباط') || cat.name.includes('حقوق') || cat.name.includes('اخلاق')
+              : isComm
               ? 'مهارت‌های ارتباطی'
               : 'مهارت‌های تخصصی';
 
@@ -235,6 +244,18 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
               const refText = `مهارت شماره ${radif} از ${catShort}`;
               stTotal += norm;
               stCount += 1;
+
+              if (isGeneral) {
+                genScore += norm;
+                genCount++;
+              } else if (isComm) {
+                commScore += norm;
+                commCount++;
+              } else {
+                specScore += norm;
+                specCount++;
+              }
+
               if (sc < 3) {
                 stWeak.push({ skillName: item.description, radif, categoryName: catShort, score: sc, referenceText: refText });
               } else if (sc >= 4) {
@@ -245,15 +266,24 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
         }
 
         const avgPct = stCount > 0 ? Math.round((stTotal / (stCount * 4)) * 100) : 0;
+        const genPct = genCount > 0 ? Math.round((genScore / (genCount * 4)) * 100) : avgPct;
+        const specPct = specCount > 0 ? Math.round((specScore / (specCount * 4)) * 100) : avgPct;
+        const commPct = commCount > 0 ? Math.round((commScore / (commCount * 4)) * 100) : avgPct;
+
         return {
           id: staff.id,
           name: staff.name,
           title: staff.title || 'کارشناس پرستاری',
           averagePercentage: avgPct,
+          generalPercentage: genPct,
+          specializedPercentage: specPct,
+          communicationPercentage: commPct,
           weakSkills: stWeak,
           expertSkills: stExpert,
         };
       });
+
+      setDeptStaffDetails(staffDetails);
 
       const plan = await generatePeriodicPlanWithAI({
         mode: 'department',
@@ -578,37 +608,45 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
         />
       </div>
 
-      {/* AI Strategic Assessment & Periodic Plan Banner for Supervisors/Managers */}
-      <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-teal-700 rounded-2xl shadow-xl p-5 sm:p-6 mb-8 text-white flex flex-col md:flex-row items-start md:items-center justify-between gap-5 border border-white/10">
-        <div className="flex items-center gap-4">
-          <div className="p-3.5 bg-white/15 backdrop-blur-md rounded-2xl border border-white/20 shadow-inner">
-            <AiIcon className="w-9 h-9 text-amber-300 animate-pulse" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-black px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-900">
-                هوش مصنوعی ارزیابی و برنامه راهبردی
-              </span>
-              <span className="text-xs text-blue-100 opacity-90">
-                منطبق بر اسامی پرسنل، نمرات مهارت‌ها و ماتریس توانمندسازی
-              </span>
+      {/* AI Strategic Assessment & Periodic Improvement Plan Banner (Mobile & Desktop Optimized) */}
+      <div className="relative overflow-hidden bg-gradient-to-br from-indigo-800 via-blue-800 to-teal-850 rounded-2xl sm:rounded-3xl shadow-xl p-4 sm:p-6 mb-8 text-white border border-white/15">
+        {/* Decorative background glow */}
+        <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-amber-400/10 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="absolute bottom-0 left-0 -ml-16 -mb-16 w-64 h-64 bg-sky-400/10 rounded-full blur-3xl pointer-events-none"></div>
+
+        <div className="relative z-10 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 sm:gap-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3.5 sm:gap-4">
+            <div className="p-3 sm:p-3.5 bg-white/15 backdrop-blur-md rounded-2xl border border-white/20 shadow-inner shrink-0 flex items-center justify-center self-start sm:self-center">
+              <AiIcon className="w-8 h-8 sm:w-9 sm:h-9 text-amber-300 animate-pulse" />
             </div>
-            <h3 className="text-lg sm:text-xl font-black mt-1">
-              شرح وضعیت کلیه پرسنل بخش و برنامه ۱، ۳، ۶ و ۱۲ ماهه
-            </h3>
-            <p className="text-xs sm:text-sm text-blue-100 opacity-90 mt-1 max-w-2xl leading-relaxed">
-              تحلیل عمیق مهارت‌های عمومی، تخصصی و ارتباطی کلیه پرسنل، شناسایی خلأهای بالینی و ارائه جدول زمان‌بندی مدون با قابلیت خروجی مستقیم فایل رسمی Word (.docx)
-            </p>
+            <div className="space-y-1.5 flex-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                <span className="text-[11px] sm:text-xs font-black px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-900 shadow-xs">
+                  برنامه بهبود و راهبردی بخش
+                </span>
+                <span className="text-[11px] sm:text-xs font-medium px-2 py-0.5 rounded-full bg-white/15 text-blue-100 border border-white/10">
+                  منطبق بر استانداردهای ۵ رفرنس بالینی و اعتباربخشی
+                </span>
+              </div>
+              <h3 className="text-base sm:text-xl font-black text-white tracking-tight leading-snug">
+                برنامه بهبود ماهانه، فصلی و راهبردی سالانه پرسنل بخش
+              </h3>
+              <p className="text-xs sm:text-sm text-blue-100/90 leading-relaxed max-w-2xl">
+                تحلیل جامع هوش مصنوعی از وضعیت نمرات مهارتی پرسنل، ماتریس توانمندسازی، جدول برنامه عملیاتی (Action Plan) و خروجی مستقیم فایل رسمی اداری ورد (.docx)
+              </p>
+            </div>
+          </div>
+
+          <div className="pt-2 sm:pt-0 lg:shrink-0 flex items-center">
+            <button
+              onClick={handleOpenDepartmentPeriodicPlan}
+              className="w-full sm:w-auto px-5 py-3 sm:py-3.5 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 hover:from-amber-300 hover:to-amber-200 active:scale-98 text-slate-950 rounded-xl sm:rounded-2xl font-black text-xs sm:text-sm transition-all shadow-lg flex items-center justify-center gap-2 border border-amber-300/60"
+            >
+              <AiIcon className="w-5 h-5 text-indigo-900" />
+              <span>مشاهده برنامه بهبود و دریافت فایل ورد (.docx)</span>
+            </button>
           </div>
         </div>
-
-        <button
-          onClick={handleOpenDepartmentPeriodicPlan}
-          className="px-5 py-3 bg-white text-indigo-900 hover:bg-amber-300 hover:text-slate-900 rounded-xl font-black text-sm transition-all shadow-lg flex items-center gap-2.5 shrink-0 self-stretch md:self-auto justify-center"
-        >
-          <AiIcon className="w-5 h-5 text-indigo-600" />
-          <span>تولید برنامه و دریافت فایل ورد</span>
-        </button>
       </div>
 
       <div className="flex justify-between items-center mb-6">
@@ -810,11 +848,11 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
     </>
   );
 
-  const baseButtonClass = "inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-lg shadow-md transition-transform transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2";
+  const baseBtnClass = "flex items-center justify-center gap-2 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-white rounded-xl shadow-sm transition-all hover:shadow-md active:scale-98 text-center";
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
-      <div className="flex flex-wrap justify-between items-center mb-6 gap-4">
+    <div className="p-3 sm:p-6 lg:p-8">
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4">
         <div className="flex items-center gap-3">
           {userRole !== UserRole.Manager && (
             <button
@@ -826,56 +864,61 @@ const DepartmentView: React.FC<DepartmentViewProps> = ({
               <span>بازگشت به لیست بخش‌ها</span>
             </button>
           )}
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100">{department.name} - <span className="text-slate-500 text-xl sm:text-2xl">سال {activeYear}</span></h1>
+          <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-900 dark:text-slate-100">
+            {department.name} - <span className="text-slate-500 text-lg sm:text-2xl">سال {activeYear}</span>
+          </h1>
         </div>
+
         {(userRole === UserRole.Admin || userRole === UserRole.Supervisor || userRole === UserRole.Manager) && (
-            <div className="flex items-center gap-2 flex-wrap justify-end">
-                <button
-                    onClick={handleOpenDepartmentPeriodicPlan}
-                    className={`${baseButtonClass} bg-gradient-to-r from-blue-600 via-indigo-600 to-teal-600 hover:from-blue-700 hover:to-teal-700 focus:ring-indigo-500 shadow-lg border border-white/20`}
-                    title="تحلیل شرح وضعیت کلیه پرسنل و برنامه ۱، ۳، ۶ و ۱۲ ماهه با امکان دانلود فایل Word"
-                >
-                    <AiIcon className="w-5 h-5 text-amber-300 animate-pulse" />
-                    <span>برنامه ۱، ۳، ۶ و ۱۲ ماهه بخش (Word)</span>
-                </button>
-                {onManageCorrectiveActions && (
-                  <button
-                    onClick={onManageCorrectiveActions}
-                    className={`${baseButtonClass} bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-500`}
-                  >
-                    <ClipboardDocumentListIcon className="w-5 h-5" />
-                    اقدامات اصلاحی بخش
-                  </button>
-                )}
-                <button
-                    onClick={onManagePatientEducation}
-                    className={`${baseButtonClass} bg-orange-500 hover:bg-orange-600 focus:ring-orange-400`}
-                >
-                    <BookOpenIcon className="w-5 h-5" />
-                    آموزش به بیمار
-                </button>
-                <button
-                    onClick={onManageTraining}
-                    className={`${baseButtonClass} bg-sky-500 hover:bg-sky-600 focus:ring-sky-400`}
-                >
-                    <AcademicCapIcon className="w-5 h-5" />
-                    آموزش به پرسنل
-                </button>
-                <button
-                    onClick={onManageExams}
-                    className={`${baseButtonClass} bg-violet-600 hover:bg-violet-700 focus:ring-violet-500`}
-                >
-                    <ClipboardDocumentCheckIcon className="w-5 h-5" />
-                    مدیریت آزمون‌ها
-                </button>
-                <button
-                    onClick={onManageChecklists}
-                    className={`${baseButtonClass} bg-teal-600 hover:bg-teal-700 focus:ring-teal-500`}
-                >
-                    <ChecklistIcon className="w-5 h-5" />
-                    مدیریت قالب‌های چک‌لیست
-                </button>
-            </div>
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2 w-full lg:w-auto justify-end">
+            {/* Hero AI Periodic Plan (Full Width on mobile) */}
+            <button
+              onClick={handleOpenDepartmentPeriodicPlan}
+              className={`${baseBtnClass} col-span-2 sm:col-auto bg-gradient-to-r from-blue-600 via-indigo-600 to-teal-600 hover:from-blue-700 hover:to-teal-700 focus:ring-indigo-500 shadow-md border border-white/20`}
+              title="تحلیل شرح وضعیت کلیه پرسنل و برنامه ۱، ۳، ۶ و ۱۲ ماهه با امکان دانلود فایل Word"
+            >
+              <AiIcon className="w-4 h-4 sm:w-5 sm:h-5 text-amber-300 animate-pulse shrink-0" />
+              <span>برنامه ۱، ۳، ۶ و ۱۲ ماهه بخش (Word)</span>
+            </button>
+
+            {/* Exams and Checklist Management (Full Width on mobile) */}
+            <button
+              onClick={onManageExams}
+              className={`${baseBtnClass} col-span-2 sm:col-auto bg-violet-600 hover:bg-violet-700 focus:ring-violet-500`}
+            >
+              <ClipboardDocumentCheckIcon className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+              <span>مدیریت آزمون‌ها و ارزیابی با چک‌لیست</span>
+            </button>
+
+            {/* Personnel Training (Half width) */}
+            <button
+              onClick={onManageTraining}
+              className={`${baseBtnClass} col-span-1 sm:col-auto bg-sky-500 hover:bg-sky-600 focus:ring-sky-400`}
+            >
+              <AcademicCapIcon className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+              <span>آموزش به پرسنل</span>
+            </button>
+
+            {/* Patient Education (Half width) */}
+            <button
+              onClick={onManagePatientEducation}
+              className={`${baseBtnClass} col-span-1 sm:col-auto bg-orange-500 hover:bg-orange-600 focus:ring-orange-400`}
+            >
+              <BookOpenIcon className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+              <span>آموزش به بیمار</span>
+            </button>
+
+            {/* Corrective Actions (Full Width on mobile) */}
+            {onManageCorrectiveActions && (
+              <button
+                onClick={onManageCorrectiveActions}
+                className={`${baseBtnClass} col-span-2 sm:col-auto bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-500`}
+              >
+                <ClipboardDocumentListIcon className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+                <span>اقدامات اصلاحی بخش</span>
+              </button>
+            )}
+          </div>
         )}
       </div>
 

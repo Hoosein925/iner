@@ -47,18 +47,26 @@ const ChecklistManager: React.FC<ChecklistManagerProps> = ({ templates, onAddOrU
         const data: (string | number)[][] = [];
         template.categories.forEach(cat => {
             cat.items.forEach(item => {
-                data.push([cat.name, item.description, '']); // Empty score column
+                const typeLabel =
+                  item.responseType === 'qualitative'
+                    ? 'کیفی'
+                    : item.responseType === 'multiple_choice'
+                    ? 'تستی'
+                    : item.responseType === 'descriptive'
+                    ? 'تشریحی'
+                    : 'کیفی';
+                data.push([cat.name, item.description, typeLabel, '']); // Empty score column
             });
         });
 
         const ws = XLSX.utils.aoa_to_sheet([
             ...header,
             [], // Empty row for spacing
-            ['دسته', 'شرح مهارت', 'نمره']
+            ['دسته', 'شرح مهارت / سوال', 'نوع پاسخ', 'نمره']
         ]);
         XLSX.utils.sheet_add_aoa(ws, data, { origin: 'A6' });
 
-        ws['!cols'] = [ { wch: 25 }, { wch: 50 }, { wch: 10 } ];
+        ws['!cols'] = [ { wch: 25 }, { wch: 50 }, { wch: 15 }, { wch: 10 } ];
         
         // Add RTL property to the sheet
         if(!ws['!props']) ws['!props'] = {};

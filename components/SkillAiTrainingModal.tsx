@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { AiIcon } from './icons/AiIcon';
 import { DocumentIcon } from './icons/DocumentIcon';
 import { generateSkillTrainingWithAI } from '../services/geminiService';
+import { UserRole } from '../types';
 
 interface SkillAiTrainingModalProps {
   isOpen: boolean;
@@ -12,7 +13,7 @@ interface SkillAiTrainingModalProps {
   staffName?: string;
   currentScore?: number;
   maxScore?: number;
-  userRole?: string;
+  userRole?: UserRole | string;
 }
 
 export const SkillAiTrainingModal: React.FC<SkillAiTrainingModalProps> = ({

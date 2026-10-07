@@ -43,6 +43,194 @@ const classifyCategory = (categoryName: string): 'general' | 'communication' | '
   return 'specialized';
 };
 
+export interface StaffMentorshipPlanItem {
+  staffId: string;
+  name: string;
+  title: string;
+  rank: number;
+  overallAvg: number;
+  genAvg: number;
+  specAvg: number;
+  commAvg: number;
+  weakSkillsCount: number;
+  weakSkills: Array<{ name: string; category?: string; scorePct?: number }>;
+  isMentor: boolean;
+  assignedMentor: {
+    name: string;
+    score: number;
+    title: string;
+    roleDesc: string;
+  };
+  proposedEducationalProgram: {
+    title: string;
+    description: string;
+    steps: string[];
+    timeline: string;
+    reassessmentMethod: string;
+  };
+}
+
+export function generateStaffMentorshipPlan(
+  leaderboard: Array<{
+    staff: StaffMember;
+    overallAvg: number;
+    genAvg: number;
+    specAvg: number;
+    commAvg: number;
+    weakSkillsCount: number;
+    userWeakSkills: Array<{ name: string; category?: string; scorePct?: number }>;
+  }>
+): {
+  items: StaffMentorshipPlanItem[];
+  markdownText: string;
+} {
+  if (!leaderboard || leaderboard.length === 0) {
+    return { items: [], markdownText: '' };
+  }
+
+  // Sort by overallAvg descending
+  const sorted = [...leaderboard].sort((a, b) => (b.overallAvg || 0) - (a.overallAvg || 0));
+  const topPerformer = sorted[0] || { staff: { id: '0', name: 'سرپرستار بخش', title: 'سرپرستار' }, overallAvg: 90 };
+
+  const items: StaffMentorshipPlanItem[] = sorted.map((st, idx) => {
+    const isTop = (st.overallAvg >= 85) || (st.staff.name === topPerformer.staff.name);
+    const weakCount = (st.userWeakSkills || []).length;
+
+    let assignedMentor = {
+      name: 'سرپرستار بخش و سوپروایزر آموزشی',
+      score: 100,
+      title: 'ناظر عالی آموزش و اعتباربخشی',
+      roleDesc: 'نظارت عالی بر ارتقای صلاحیت و ارزشیابی بالینی'
+    };
+
+    if (!isTop) {
+      assignedMentor = {
+        name: `${topPerformer.staff.name}`,
+        score: topPerformer.overallAvg,
+        title: topPerformer.staff.title || 'کارشناس بالینی برتر',
+        roleDesc: 'راهنمایی بر بالین بیمار در شیفت، رفع اشکال پروسیجرال و منتورشیپ مستقیم'
+      };
+    }
+
+    // Determine educational training program tailored to weak skills
+    let title = 'برنامه بازآموزی مهارتی و ارتقای شایستگی بالینی بر بالین';
+    let description = 'مرور گایدلاین‌های بالینی مصوب و اجرای پروسیجرها تحت نظارت مستقیم منتور شیفت';
+    let steps = [
+      'فاز ۱ (روز ۱ تا ۱۰): مرور گایدلاین‌های بالینی و مطالعه دستورالعمل‌های مصوب معاونت درمان',
+      'فاز ۲ (روز ۱۱ تا ۲۰): تمرین سناریومحور در Skill Lab و اجرای پروسیجرها تحت نظارت مستقیم منتور شیفت',
+      'فاز ۳ (روز ۲۱ تا ۳۰): اجرای مستقل پروسیجر بر بالین بیمار و ثبت آزمون بالینی DOPS'
+    ];
+
+    if (isTop) {
+      title = 'تثبیت شایستگی بالینی و ایفای نقش مربی بالینی در شیفت (Preceptor)';
+      description = 'مشارکت فعال در آموزش همکاران شیفت، نظارت بر پروسیجرهای پرخطر و هدایت چک‌لیست‌های بالینی';
+      steps = [
+        'شرکت در کارگاه توانمندسازی مربیان بالینی و آموزش بر بالین (Preceptorship)',
+        'نظارت بر رعایت زنجیره آسپتیک و پروتکل‌های دارودهی همکاران نیازمند توانمندسازی در شیفت',
+        'مشارکت در ارزیابی مهارت‌های پروسیجرال همکاران با چک‌لیست DOPS و ارائه بازخورد سازنده'
+      ];
+    } else if (weakCount > 0) {
+      const weakText = (st.userWeakSkills || []).map(w => w.name).join(' ');
+      if (/دارو|تزریق|سرم|انفیوژن|محاسبات/i.test(weakText)) {
+        title = 'کارگاه بازآموزی محاسبات دارویی و ایمنی تزریق داروهای پرخطر (High-Alert Meds)';
+        description = 'تسلط بر پنج قانون دارودهی ایمن، پیشگیری از خطاهای دارویی و کنترل محاسبات در انفیوژن‌های وریدی';
+        steps = [
+          'فاز ۱ (روز ۱ تا ۱۰): مطالعه گایدلاین داروهای پرخطر، الکترولیت‌های غلیظ و فرمول‌های محاسبات دارویی',
+          'فاز ۲ (روز ۱۱ تا ۲۰): تمرین عملی محاسبات دوزاژ و آماده‌سازی داروهای ویژه تحت نظارت مستقیم منتور',
+          'فاز ۳ (روز ۲۱ تا ۳۰): ارزشیابی مستقل فرآیند دارودهی بر بالین بیمار با چک‌لیست DOPS'
+        ];
+      } else if (/احیا|اکسیژن|ساکشن|راه هوایی|سی‌پی‌آر|cpr|اینتوباسیون|شوک/i.test(weakText)) {
+        title = 'کارگاه تخصصی احیای قلبی ریوی پایه و پیشرفته، اکسیژن‌تراپی و مدیریت راه هوایی';
+        description = 'تسلط بر کد ۹۹، باز نگه‌داشتن راه هوایی، ونتیلاسیون با آمبوبگ و ساکشن ایمن ترشحات';
+        steps = [
+          'فاز ۱ (روز ۱ تا ۱۰): مرور پروتکل‌های کشوری احیا (ACLS)، الگوریتم‌های کد ۹۹ و چک ترالی احیا',
+          'فاز ۲ (روز ۱۱ تا ۲۰): شبیه‌سازی سناریوی ایست قلبی تنفسی و تمرین ماساژ و ساکشن روی مولاژ در Skill Lab',
+          'فاز ۳ (روز ۲۱ تا ۳۰): شرکت در مانور کد ۹۹ بخش و ارزشیابی مدیریت بحران توسط سرپرستار'
+        ];
+      } else if (/عفونت|آسپتیک|سوند|پانسمان|استریل|بهداشت دست/i.test(weakText)) {
+        title = 'کارگاه استانداردهای کنترل عفونت، تکنیک‌های آسپتیک و سونداژ استریل';
+        description = 'رعایت دقیق زنجیره آسپتیک، بهداشت دست در ۵ موقعیت و مراقبت استاندارد از کاتترها';
+        steps = [
+          'فاز ۱ (روز ۱ تا ۱۰): مرور پروتکل‌های کنترل عفونت بیمارستانی و راهنمای سونداژ ادراری و تعویض پانسمان',
+          'فاز ۲ (روز ۱۱ تا ۲۰): اجرای تکنیک‌های استریل تحت نظارت مستقیم منتور در شیفت کاری',
+          'فاز ۳ (روز ۲۱ تا ۳۰): ممیزی عملکرد با چک‌لیست کنترل عفونت و کسب تأییدیه DOPS'
+        ];
+      } else if (/ارتباط|تحویل|isbar|گزارش|مستند|حقوق/i.test(weakText)) {
+        title = 'کارگاه تحویل شیفت ایمن با الگوی ISBAR، مستندسازی بالینی و اخلاق حرفه‌ای';
+        description = 'استانداردسازی انتقال اطلاعات بیمار در تغییر شیفت، ثبت دقیق کاردکس و رعایت حقوق بیمار';
+        steps = [
+          'فاز ۱ (روز ۱ تا ۱۰): آموزش اجزای استاندارد الگوی ISBAR و الزامات اعتباربخشی در گزارش‌نویسی',
+          'فاز ۲ (روز ۱۱ تا ۲۰): تحویل شیفت عملی بر بالین بیمار تحت نظارت منتور بالینی',
+          'فاز ۳ (روز ۲۱ تا ۳۰): ممیزی هفتگی پرونده‌ها و کاردکس‌ها توسط سرپرستار بخش'
+        ];
+      }
+    }
+
+    return {
+      staffId: st.staff.id,
+      name: st.staff.name,
+      title: st.staff.title || 'کارشناس پرستاری',
+      rank: idx + 1,
+      overallAvg: st.overallAvg,
+      genAvg: st.genAvg,
+      specAvg: st.specAvg,
+      commAvg: st.commAvg,
+      weakSkillsCount: weakCount,
+      weakSkills: st.userWeakSkills || [],
+      isMentor: isTop,
+      assignedMentor,
+      proposedEducationalProgram: {
+        title,
+        description,
+        steps,
+        timeline: '۳۰ روز کاری',
+        reassessmentMethod: 'آزمون مشاهده مستقیم مهارت‌های پروسیجرال (DOPS) بر بالین بیمار'
+      }
+    };
+  });
+
+  // Build markdown for Word export and text copying
+  let md = `\n\n### ۳. ماتریس برنامه توانمندسازی پرسنل و منتورهای بالینی معین (بر اساس نمرات):\n\n`;
+  md += `| ردیف | نام پرسنل | سمت | میانگین شایستگی | وضعیت مهارت‌ها | برنامه آموزشی پیشنهادی مشخص | منتور بالینی معین (بر اساس نمرات) | مهلت و شیوه ارزیابی |\n`;
+  md += `|:---:|:---|:---:|:---:|:---|:---|:---:|:---:|\n`;
+
+  items.forEach((item, idx) => {
+    const statusText = item.isMentor
+      ? '🟢 مربی بالینی شیفت (نمره برتر)'
+      : item.weakSkillsCount > 0
+      ? `🔴 دارای ${item.weakSkillsCount} سنجه نیازمند بهبود`
+      : '🟡 شایستگی مستقل و رو به رشد';
+
+    const mentorText = item.isMentor
+      ? 'سرپرستار بخش / سوپروایزر آموزشی'
+      : `${item.assignedMentor.name} (کادر برتر بخش با نمره ${item.assignedMentor.score}٪)`;
+
+    md += `| ${idx + 1} | **${item.name}** | ${item.title} | ${item.overallAvg}٪ | ${statusText} | ${item.proposedEducationalProgram.title} | **${mentorText}** | ${item.proposedEducationalProgram.timeline} - آزمون DOPS |\n`;
+  });
+
+  md += `\n\n### ۴. برنامه توانمندسازی انفرادی هر پرسنل با توجه به مهارت‌ها و نمرات:\n`;
+  items.forEach((item, idx) => {
+    md += `\n#### ۴.${idx + 1}. برنامه آموزشی اختصاصی: **${item.name}** (${item.title})\n`;
+    md += `- **میانگین شایستگی فردی:** ${item.overallAvg}٪ (عمومی: ${item.genAvg}٪ | تخصصی: ${item.specAvg}٪ | ارتباطی: ${item.commAvg}٪)\n`;
+    md += `- **رتبه در بخش:** رتبه ${item.rank} از بین ${items.length} پرسنل پایش‌شده\n`;
+    if (item.weakSkillsCount > 0) {
+      md += `- **سنجه‌های دارای ضعف در کارنامه:** ${item.weakSkills.map(w => `«${w.name}» (${w.scorePct || ''}٪)`).join('، ')}\n`;
+    } else {
+      md += `- **وضعیت ارزیابی:** تسلط کامل در کلیه سنجه‌ها و فاقد نمره زیر ۷۰٪\n`;
+    }
+    md += `- **عنوان برنامه پیشنهادی:** **${item.proposedEducationalProgram.title}**\n`;
+    md += `- **شرح برنامه:** ${item.proposedEducationalProgram.description}\n`;
+    md += `- **گام‌های اجرایی:**\n`;
+    item.proposedEducationalProgram.steps.forEach((step, sIdx) => {
+      md += `  ${sIdx + 1}. ${step}\n`;
+    });
+    md += `- **شخص منتور بالینی معین (بر اساس نمرات):** **${item.assignedMentor.name}** (نمره مهارتی: ${item.assignedMentor.score}٪ - ${item.assignedMentor.roleDesc})\n`;
+    md += `- **مهلت و روش ارزیابی مجدد:** ${item.proposedEducationalProgram.timeline} با ${item.proposedEducationalProgram.reassessmentMethod}\n`;
+  });
+
+  return { items, markdownText: md };
+}
+
 // Helper to calculate score percentage
 const calculatePercentage = (score: number, maxScore?: number): number => {
   if (typeof score !== 'number' || isNaN(score)) return 0;
@@ -258,6 +446,9 @@ export const CorrectiveActionsView: React.FC<CorrectiveActionsViewProps> = ({
   const [deptCustomAnswer, setDeptCustomAnswer] = useState<string | null>(null);
   const [isDeptCustomLoading, setIsDeptCustomLoading] = useState<boolean>(false);
 
+  // Copied staff id for clipboard feedback
+  const [copiedStaffId, setCopiedStaffId] = useState<string | null>(null);
+
   // Form State for new Action
   const [newActionTitle, setNewActionTitle] = useState<string>('');
   const [newActionDesc, setNewActionDesc] = useState<string>('');
@@ -290,31 +481,17 @@ export const CorrectiveActionsView: React.FC<CorrectiveActionsViewProps> = ({
     }
   }, [isDirectDepartmentMode, departmentId, managerDept, activeDeptId]);
 
-  // Support phone back button when drilling down into department inside hospital mode
+  // Drilling into a department (from the hospital-wide table) and stepping back out of
+  // it is handled with plain component state only. This view previously also pushed its
+  // own entries onto window.history and listened for popstate here — but the app already
+  // has its own top-level history/back-navigation system (see App.tsx), and having two
+  // independent systems write to the same window.history caused the app's back button to
+  // stop working reliably after visiting this page. Keeping this purely in React state
+  // avoids that conflict entirely; the in-page back button below still steps out of a
+  // department one level at a time, exactly as before.
   const handleSelectDepartmentDrillDown = (deptId: string) => {
     setActiveDeptId(deptId);
-    try {
-      const currentDepth = (window.history.state && typeof window.history.state.depth === 'number')
-        ? window.history.state.depth
-        : 0;
-      window.history.pushState({ ...window.history.state, correctiveDeptId: deptId, depth: currentDepth + 1 }, '');
-    } catch (e) {}
   };
-
-  useEffect(() => {
-    if (isDirectDepartmentMode) return;
-
-    const handlePop = (e: PopStateEvent) => {
-      if (e.state && e.state.correctiveDeptId) {
-        setActiveDeptId(e.state.correctiveDeptId);
-      } else {
-        setActiveDeptId(null);
-      }
-    };
-
-    window.addEventListener('popstate', handlePop);
-    return () => window.removeEventListener('popstate', handlePop);
-  }, [isDirectDepartmentMode]);
 
   const handleViewBack = () => {
     if (isDirectDepartmentMode) {
@@ -322,11 +499,7 @@ export const CorrectiveActionsView: React.FC<CorrectiveActionsViewProps> = ({
       return;
     }
     if (activeDeptId) {
-      if (window.history.state?.correctiveDeptId) {
-        window.history.back();
-      } else {
-        setActiveDeptId(null);
-      }
+      setActiveDeptId(null);
       return;
     }
     onBack();
@@ -864,6 +1037,11 @@ export const CorrectiveActionsView: React.FC<CorrectiveActionsViewProps> = ({
     };
   }, [activeDept, activeYear, selectedMonth]);
 
+  // Memoized staff mentorship & educational plan data
+  const staffMentorshipData = useMemo(() => {
+    return generateStaffMentorshipPlan(departmentDetails?.leaderboard || []);
+  }, [departmentDetails?.leaderboard]);
+
   // Form submission handler for custom corrective action
   const handleSaveCustomAction = (e: React.FormEvent) => {
     e.preventDefault();
@@ -921,6 +1099,17 @@ export const CorrectiveActionsView: React.FC<CorrectiveActionsViewProps> = ({
     setIsAiDeptModalOpen(true);
     setIsAiDeptLoading(true);
     try {
+      const staffList = departmentDetails.leaderboard.map(item => ({
+        name: item.staff.name,
+        title: item.staff.title || 'کارشناس پرستاری',
+        overallAvg: item.overallAvg,
+        genAvg: item.genAvg,
+        specAvg: item.specAvg,
+        commAvg: item.commAvg,
+        weakSkillsCount: item.weakSkillsCount,
+        weakSkills: item.userWeakSkills,
+      }));
+
       const res = await analyzeSkillsWithAI({
         contextType: 'department',
         departmentName: activeDept.name,
@@ -935,6 +1124,7 @@ export const CorrectiveActionsView: React.FC<CorrectiveActionsViewProps> = ({
           averageScore: s.averageScore,
           lowCount: s.lowCount,
         })),
+        staffList,
       });
       setAiDeptText(res);
     } catch (err) {
@@ -998,7 +1188,8 @@ export const CorrectiveActionsView: React.FC<CorrectiveActionsViewProps> = ({
     analysisText: string | null,
     userQuery?: string,
     customAnswer?: string | null,
-    filename: string = 'گزارش_هوش_مصنوعی'
+    filename: string = 'گزارش_هوش_مصنوعی',
+    staffPlanMarkdown?: string
   ) => {
     const sections: { heading: string; content: string }[] = [];
 
@@ -1013,6 +1204,13 @@ export const CorrectiveActionsView: React.FC<CorrectiveActionsViewProps> = ({
       sections.push({
         heading: '۲. پرسش اختصاصی کاربر و تحلیل مرتبط',
         content: `سوال / درخواست کاربر:\n"${userQuery.trim()}"\n\nپاسخ هوش مصنوعی بر اساس نمرات مهارتی:\n${customAnswer || 'در انتظار پاسخ...'}`
+      });
+    }
+
+    if (staffPlanMarkdown && staffPlanMarkdown.trim()) {
+      sections.push({
+        heading: '۳. ماتریس برنامه توانمندسازی پرسنل و منتورهای بالینی معین (بر اساس نمرات)',
+        content: staffPlanMarkdown,
       });
     }
 
@@ -2386,13 +2584,15 @@ export const CorrectiveActionsView: React.FC<CorrectiveActionsViewProps> = ({
                   <span className="text-[10px] bg-white/10 px-2 py-0.5 rounded-full border border-white/20">✓ اعتباربخشی وزارت بهداشت</span>
                 </div>
               </div>
-              <button
-                onClick={() => setIsAiDeptModalOpen(true)}
-                className="px-5 py-3 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs rounded-xl shadow-md transition-all whitespace-nowrap flex items-center gap-2 self-stretch md:self-auto justify-center"
-              >
-                <LightbulbIcon className="w-4 h-4 text-slate-950" />
-                مشاهده تحلیل و مشاوره هوشمند بخش
-              </button>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 self-stretch md:self-auto">
+                <button
+                  onClick={handleOpenAiDeptModal}
+                  className="px-5 py-3 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs rounded-xl shadow-md transition-all whitespace-nowrap flex items-center gap-2 justify-center"
+                >
+                  <LightbulbIcon className="w-4 h-4 text-slate-950" />
+                  برنامه پیشنهادی و مشاوره هوشمند بخش
+                </button>
+              </div>
             </div>
 
             {/* SECTION 1: Department Registered Corrective Actions (Placed FIRST per user request) */}
@@ -2858,7 +3058,8 @@ export const CorrectiveActionsView: React.FC<CorrectiveActionsViewProps> = ({
                       aiDeptText,
                       deptUserQuery,
                       deptCustomAnswer,
-                      `گزارش_تحلیل_هوشمند_بخش_${activeDept.name}`
+                      `گزارش_تحلیل_هوشمند_بخش_${activeDept.name}`,
+                      staffMentorshipData.markdownText
                     )
                   }
                   className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold text-xs rounded-xl transition-all shadow-sm flex items-center gap-1.5"
@@ -2990,6 +3191,275 @@ export const CorrectiveActionsView: React.FC<CorrectiveActionsViewProps> = ({
                   ))}
                 </div>
               )}
+
+              {/* ========================================================= */}
+              {/* SECTION 4: INDIVIDUAL STAFF EDUCATIONAL PLANS & MENTORS   */}
+              {/* ========================================================= */}
+              <div className="space-y-4 pt-5 border-t-2 border-dashed border-emerald-300 dark:border-emerald-800">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 dark:from-slate-800 dark:via-slate-800 dark:to-emerald-950/40 p-4 rounded-xl border border-emerald-200 dark:border-emerald-800">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-emerald-600 text-white rounded-lg shadow-sm">
+                      <AcademicCapIcon className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-emerald-950 dark:text-emerald-200">
+                        ۴. برنامه آموزشی پیشنهادی برای هر پرسنل و منتورهای بالینی معین (بر اساس نمرات)
+                      </h4>
+                      <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                        برنامه توانمندسازی انفرادی منطبق بر سنجه‌های نیازمند بهبود و انتصاب منتور بالینی بر اساس نمرات کارنامه
+                      </p>
+                    </div>
+                  </div>
+                  {staffMentorshipData.items.length > 0 && (
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(staffMentorshipData.markdownText);
+                        alert('متن کامل ماتریس پرسنل و منتورها کپی شد.');
+                      }}
+                      className="text-xs px-3 py-1.5 bg-white hover:bg-slate-50 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-bold rounded-lg border border-emerald-300 dark:border-slate-600 transition-all self-start sm:self-auto flex items-center gap-1.5 shadow-sm"
+                    >
+                      <ClipboardDocumentListIcon className="w-4 h-4 text-emerald-600" />
+                      کپی ماتریس پرسنل
+                    </button>
+                  )}
+                </div>
+
+                {staffMentorshipData.items.length === 0 ? (
+                  <div className="p-5 text-center bg-slate-50 dark:bg-slate-700/30 rounded-xl text-slate-500 text-xs">
+                    داده‌های ارزیابی پرسنل در این دوره یافت نشد.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* STAFF MATRIX SUMMARY TABLE */}
+                    <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                      <table className="w-full text-right text-xs border-collapse">
+                        <thead className="bg-slate-100 dark:bg-slate-700/80 text-slate-700 dark:text-slate-200 font-bold">
+                          <tr className="border-b border-slate-200 dark:border-slate-600">
+                            <th className="p-2.5 text-center">ردیف</th>
+                            <th className="p-2.5">نام و سمت پرسنل</th>
+                            <th className="p-2.5 text-center">میانگین کل</th>
+                            <th className="p-2.5">وضعیت و سنجه‌های دارای ضعف</th>
+                            <th className="p-2.5">برنامه آموزشی پیشنهادی مشخص</th>
+                            <th className="p-2.5 text-emerald-800 dark:text-emerald-300">شخص منتور بالینی معین (بر اساس نمرات)</th>
+                            <th className="p-2.5 text-center">مهلت و شیوه ارزیابی</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 dark:divide-slate-700 bg-white dark:bg-slate-800">
+                          {staffMentorshipData.items.map((st, idx) => {
+                            const badge = getScoreBadge(st.overallAvg);
+                            return (
+                              <tr
+                                key={st.staffId || idx}
+                                className={`hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors ${st.isMentor ? 'bg-emerald-50/40 dark:bg-emerald-950/20' : ''}`}
+                              >
+                                <td className="p-2.5 text-center font-bold text-slate-500">{idx + 1}</td>
+                                <td className="p-2.5 font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                                  {st.name}
+                                  <div className="text-[10px] text-slate-500 font-normal">{st.title}</div>
+                                </td>
+                                <td className="p-2.5 text-center whitespace-nowrap">
+                                  <span className={`px-2 py-0.5 rounded text-[11px] font-bold border ${badge.bg}`}>
+                                    {st.overallAvg}٪
+                                  </span>
+                                </td>
+                                <td className="p-2.5">
+                                  {st.isMentor ? (
+                                    <span className="text-emerald-700 dark:text-emerald-300 font-semibold text-[11px]">
+                                      ✓ تسلط مستقل و کادر برتر بخش (نمره ۴)
+                                    </span>
+                                  ) : st.weakSkillsCount > 0 ? (
+                                    <div className="space-y-1">
+                                      <span className="text-rose-600 dark:text-rose-400 font-bold text-[11px]">
+                                        {st.weakSkillsCount} سنجه زیر ۷۰٪
+                                      </span>
+                                      <div className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-1">
+                                        {st.weakSkills.slice(0, 2).map(w => w.name).join('، ')}
+                                        {st.weakSkills.length > 2 && ' و...'}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <span className="text-amber-600 dark:text-amber-400 font-semibold text-[11px]">
+                                      متوسط رو به رشد (فاقد سنجه بحرانی)
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="p-2.5 font-medium text-slate-800 dark:text-slate-200">
+                                  <div className="font-bold text-[11px] text-indigo-700 dark:text-indigo-300">
+                                    {st.proposedEducationalProgram.title}
+                                  </div>
+                                  <div className="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-1 mt-0.5">
+                                    {st.proposedEducationalProgram.description}
+                                  </div>
+                                </td>
+                                <td className="p-2.5 whitespace-nowrap">
+                                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-100/70 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200 rounded-lg border border-emerald-300/60 dark:border-emerald-700/60">
+                                    <ShieldCheckIcon className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span className="font-bold text-[11px]">
+                                      {st.isMentor ? 'سرپرستار بخش / سوپروایزر آموزشی' : st.assignedMentor.name}
+                                    </span>
+                                  </div>
+                                  {!st.isMentor && (
+                                    <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                      نمره منتور: {st.assignedMentor.score}٪ (کادر برتر بخش)
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="p-2.5 text-center whitespace-nowrap text-[11px] text-slate-600 dark:text-slate-300">
+                                  <span className="font-semibold text-slate-800 dark:text-slate-200">۳۰ روز کاری</span>
+                                  <div className="text-[10px] text-slate-500">آزمون بالینی DOPS</div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* DETAILED STAFF CARDS */}
+                    <div className="space-y-3 pt-2">
+                      <div className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-between">
+                        <span>شرح تفصیلی برنامه آموزشی و وظایف منتور برای تک‌تک پرسنل:</span>
+                        <span className="text-[11px] text-slate-500">({staffMentorshipData.items.length} پرسنل)</span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                        {staffMentorshipData.items.map((st, idx) => {
+                          const isCopied = copiedStaffId === st.staffId;
+                          const badge = getScoreBadge(st.overallAvg);
+
+                          return (
+                            <div
+                              key={st.staffId || idx}
+                              className={`p-4 rounded-xl border transition-all ${
+                                st.isMentor
+                                  ? 'bg-gradient-to-br from-emerald-50/40 to-teal-50/40 dark:from-slate-800 dark:to-emerald-950/30 border-emerald-300 dark:border-emerald-800/80 shadow-sm'
+                                  : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 shadow-sm'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-2 border-b border-slate-200/80 dark:border-slate-700/80 pb-3">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-5 h-5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] font-bold flex items-center justify-center">
+                                      {idx + 1}
+                                    </span>
+                                    <span className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                                      {st.name}
+                                    </span>
+                                    <span className="text-[10px] bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded">
+                                      {st.title}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2 mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                                    <span>عمومی: {st.genAvg}٪</span>
+                                    <span>•</span>
+                                    <span>تخصصی: {st.specAvg}٪</span>
+                                    <span>•</span>
+                                    <span>ارتباطی: {st.commAvg}٪</span>
+                                  </div>
+                                </div>
+                                <div className="text-left">
+                                  <span className={`px-2 py-1 rounded text-xs font-bold border ${badge.bg}`}>
+                                    میانگین: {st.overallAvg}٪
+                                  </span>
+                                  <div className="text-[10px] text-slate-500 mt-1">
+                                    رتبه {st.rank} در بخش
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="pt-3 space-y-2.5 text-xs">
+                                {/* Weak Skills Box */}
+                                {st.weakSkillsCount > 0 ? (
+                                  <div className="bg-rose-50/70 dark:bg-rose-950/30 p-2.5 rounded-lg border border-rose-200 dark:border-rose-800/50">
+                                    <div className="font-bold text-[11px] text-rose-800 dark:text-rose-300 flex items-center gap-1">
+                                      <span>⚠️ سنجه‌های دارای ضعف در کارنامه ({st.weakSkillsCount} سنجه):</span>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1 mt-1.5">
+                                      {st.weakSkills.map((w, wIdx) => (
+                                        <span
+                                          key={wIdx}
+                                          className="inline-block text-[10px] px-2 py-0.5 bg-white dark:bg-slate-800 text-rose-700 dark:text-rose-300 rounded border border-rose-200 dark:border-rose-800 font-medium"
+                                        >
+                                          {w.name} {w.scorePct ? `(${w.scorePct}٪)` : ''}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="bg-emerald-50/70 dark:bg-emerald-950/30 p-2.5 rounded-lg border border-emerald-200 dark:border-emerald-800/50 text-[11px] text-emerald-800 dark:text-emerald-300 font-medium">
+                                    ✓ تسلط کامل و مستقل در تمامی مهارت‌های ارزیابی‌شده (فاقد سنجه زیر ۷۰٪).
+                                  </div>
+                                )}
+
+                                {/* Proposed Program */}
+                                <div className="bg-indigo-50/60 dark:bg-slate-700/40 p-2.5 rounded-lg border border-indigo-100 dark:border-slate-600/60 space-y-1.5">
+                                  <div className="font-bold text-indigo-900 dark:text-indigo-200 flex items-center gap-1.5">
+                                    <AcademicCapIcon className="w-4 h-4 text-indigo-600" />
+                                    <span>برنامه آموزشی پیشنهادی: {st.proposedEducationalProgram.title}</span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                                    {st.proposedEducationalProgram.description}
+                                  </p>
+                                  <div className="space-y-1 pt-1 border-t border-indigo-100 dark:border-slate-600">
+                                    {st.proposedEducationalProgram.steps.map((stp, sIdx) => (
+                                      <div key={sIdx} className="text-[10px] text-slate-700 dark:text-slate-300 flex items-start gap-1">
+                                        <span className="text-indigo-600 font-bold">•</span>
+                                        <span>{stp}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                {/* Designated Mentor Box */}
+                                <div className="bg-emerald-50/80 dark:bg-emerald-950/40 p-2.5 rounded-lg border border-emerald-200 dark:border-emerald-800/70 flex items-start justify-between gap-2">
+                                  <div>
+                                    <div className="text-[11px] text-emerald-900 dark:text-emerald-200 font-bold flex items-center gap-1.5">
+                                      <ShieldCheckIcon className="w-4 h-4 text-emerald-600" />
+                                      <span>شخص منتور بالینی معین (بر اساس نمرات):</span>
+                                    </div>
+                                    <div className="text-xs font-bold text-slate-900 dark:text-slate-100 mt-1">
+                                      {st.isMentor ? 'سرپرستار بخش و سوپروایزر آموزشی' : st.assignedMentor.name}
+                                    </div>
+                                    <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">
+                                      {st.isMentor
+                                        ? 'نظارت عالی بر هدایت بالینی پرسنل و تأیید آزمون‌های DOPS'
+                                        : `کادر برتر بخش (نمره: ${st.assignedMentor.score}٪) - ${st.assignedMentor.roleDesc}`}
+                                    </div>
+                                  </div>
+                                  <div className="text-left shrink-0">
+                                    <span className="text-[10px] bg-emerald-200 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-200 px-2 py-0.5 rounded font-bold">
+                                      {st.isMentor ? 'ناظر مربیان' : 'منتور مستقیم'}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Reassessment info and copy button */}
+                                <div className="flex items-center justify-between pt-1 text-[11px]">
+                                  <span className="text-slate-500 dark:text-slate-400">
+                                    مهلت اجرا: <strong>۳۰ روز کاری</strong> (آزمون DOPS)
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      const textToCopy = `برنامه توانمندسازی ${st.name} (${st.title}):\nمیانگین شایستگی: ${st.overallAvg}٪\nبرنامه آموزشی: ${st.proposedEducationalProgram.title}\nگام‌ها:\n${st.proposedEducationalProgram.steps.join('\n')}\nمنتور معین: ${st.isMentor ? 'سرپرستار بخش' : st.assignedMentor.name} (نمره: ${st.assignedMentor.score}٪)\nمهلت و شیوه ارزیابی: ۳۰ روزه با آزمون بالینی DOPS`;
+                                      navigator.clipboard.writeText(textToCopy);
+                                      setCopiedStaffId(st.staffId);
+                                      setTimeout(() => setCopiedStaffId(null), 2500);
+                                    }}
+                                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded font-bold text-[10px] border border-slate-300 dark:border-slate-600 transition-all flex items-center gap-1"
+                                  >
+                                    <ClipboardDocumentListIcon className="w-3 h-3" />
+                                    {isCopied ? 'کپی شد ✓' : 'کپی برنامه این پرسنل'}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/30 flex items-center justify-between">
@@ -3000,7 +3470,8 @@ export const CorrectiveActionsView: React.FC<CorrectiveActionsViewProps> = ({
                     aiDeptText,
                     deptUserQuery,
                     deptCustomAnswer,
-                    `گزارش_تحلیل_هوشمند_بخش_${activeDept.name}`
+                    `گزارش_تحلیل_هوشمند_بخش_${activeDept.name}`,
+                    staffMentorshipData.markdownText
                   )
                 }
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-all shadow-sm flex items-center gap-2"
