@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, Suspense, useRef } from 'react';
-import { Department, StaffMember, View, SkillCategory, Assessment, Hospital, AppScreen, NamedChecklistTemplate, ExamTemplate, ExamSubmission, LoggedInUser, UserRole, TrainingMaterial, MonthlyTraining, NewsBanner, MonthlyWorkLog, Patient, ChatMessage, AdminMessage, NeedsAssessmentTopic, MonthlyNeedsAssessment, CustomCorrectiveAction } from './types';
+import { Department, StaffMember, View, SkillCategory, Assessment, Hospital, AppScreen, NamedChecklistTemplate, ExamTemplate, ExamSubmission, LoggedInUser, UserRole, TrainingMaterial, MonthlyTraining, NewsBanner, MonthlyWorkLog, Patient, ChatMessage, AdminMessage, NeedsAssessmentTopic, MonthlyNeedsAssessment, CustomCorrectiveAction, StaffChecklistEvaluation, ProvincialOfficer, ArchivedArticleTemplate, AppAboutInfo } from './types';
 import LoadingSpinner from './components/LoadingSpinner';
 import AboutModal from './components/AboutModal';
 import LoginModal from './components/LoginModal';
@@ -12,6 +12,8 @@ import Footer from './components/Footer';
 
 import WelcomeScreen from './components/WelcomeScreen';
 import HospitalList from './components/HospitalList';
+import SuperAdminDashboard from './components/SuperAdminDashboard';
+import IMessageChatView from './components/IMessageChatView';
 import DepartmentList from './components/DepartmentList';
 import DepartmentView from './components/DepartmentView';
 import StaffMemberView from './components/StaffMemberView';
@@ -22,10 +24,10 @@ import AccreditationManager from './components/AccreditationManager';
 import NewsBannerManager from './components/NewsBannerManager';
 import PatientEducationManager from './components/PatientEducationManager';
 import PatientPortalView from './components/PatientPortalView';
-import AdminCommunicationView from './components/AdminCommunicationView';
-import HospitalCommunicationView from './components/HospitalCommunicationView';
 import NeedsAssessmentManager from './components/NeedsAssessmentManager';
 import CorrectiveActionsView from './components/CorrectiveActionsView';
+import SensitiveIndicatorsView from './components/SensitiveIndicatorsView';
+import { SensitiveIndicatorsReport } from './types';
 
 // Type for file data passed from components to App
 interface FileUploadData {
@@ -33,6 +35,8 @@ interface FileUploadData {
     type: string;
     dataUrl: string;
     description?: string;
+    articleContent?: string;
+    videoUrl?: string;
 }
 
 const getCurrentJalaliYear = () => {
@@ -116,6 +120,17 @@ const getBackState = (state: NavigationState, user: LoggedInUser | null): Naviga
     };
   }
 
+  // 3b. SensitiveIndicators (opened from the hospital's DepartmentList page)
+  if (state.currentView === View.SensitiveIndicators) {
+    return {
+      appScreen: AppScreen.MainApp,
+      currentView: View.DepartmentList,
+      selectedHospitalId: state.selectedHospitalId,
+      selectedDepartmentId: null,
+      selectedStaffId: null,
+    };
+  }
+
   // 4. DepartmentView
   if (state.currentView === View.DepartmentView) {
     if (user.role === UserRole.Manager) return null;
@@ -146,6 +161,15 @@ const getBackState = (state: NavigationState, user: LoggedInUser | null): Naviga
 
   // 6. AdminCommunication
   if (state.currentView === View.AdminCommunication) {
+    if (state.appScreen === AppScreen.SuperAdmin) {
+      return {
+        appScreen: AppScreen.SuperAdmin,
+        currentView: View.DepartmentList,
+        selectedHospitalId: null,
+        selectedDepartmentId: null,
+        selectedStaffId: null,
+      };
+    }
     return {
       appScreen: AppScreen.HospitalList,
       currentView: View.DepartmentList,
@@ -157,7 +181,7 @@ const getBackState = (state: NavigationState, user: LoggedInUser | null): Naviga
 
   // 7. DepartmentList
   if (state.currentView === View.DepartmentList) {
-    if (user.role === UserRole.Admin && state.appScreen === AppScreen.MainApp) {
+    if ((user.role === UserRole.Admin || user.role === UserRole.ProvincialOfficer) && state.appScreen === AppScreen.MainApp) {
       return {
         appScreen: AppScreen.HospitalList,
         currentView: View.DepartmentList,
@@ -171,6 +195,15 @@ const getBackState = (state: NavigationState, user: LoggedInUser | null): Naviga
 
   // 8. HospitalList
   if (state.appScreen === AppScreen.HospitalList) {
+    if (user.role === UserRole.Admin) {
+      return {
+        appScreen: AppScreen.SuperAdmin,
+        currentView: View.DepartmentList,
+        selectedHospitalId: null,
+        selectedDepartmentId: null,
+        selectedStaffId: null,
+      };
+    }
     return null;
   }
 
@@ -227,14 +260,29 @@ const getInitialSession = (): { user: LoggedInUser | null; nav: NavigationState 
     if (navStr) {
       const parsed = JSON.parse(navStr);
       if (parsed && typeof parsed.appScreen === 'number' && parsed.appScreen !== AppScreen.Welcome) {
+        // Never trust a persisted hospital/department/staff ID blindly: on a shared
+        // browser, a different person's session (e.g. a supervisor from another
+        // hospital who didn't log out) may have left this behind. For every role
+        // except Admin, the restored IDs are only used if they match this user's
+        // OWN assigned hospital/department/staff; otherwise we fall back to the
+        // user's own IDs so the wrong hospital/department can never be restored.
+        const isAdmin = user.role === UserRole.Admin;
+        const restoredHospitalId = parsed.selectedHospitalId ?? null;
+        const restoredDepartmentId = parsed.selectedDepartmentId ?? null;
+        const restoredStaffId = parsed.selectedStaffId ?? null;
+
+        const hospitalMatches = isAdmin || !user.hospitalId || restoredHospitalId === user.hospitalId;
+        const departmentMatches = isAdmin || !user.departmentId || restoredDepartmentId === user.departmentId;
+        const staffMatches = isAdmin || !user.staffId || restoredStaffId === user.staffId;
+
         return {
           user,
           nav: {
             appScreen: parsed.appScreen,
             currentView: typeof parsed.currentView === 'number' ? parsed.currentView : View.DepartmentList,
-            selectedHospitalId: parsed.selectedHospitalId ?? (user.hospitalId || null),
-            selectedDepartmentId: parsed.selectedDepartmentId ?? (user.departmentId || null),
-            selectedStaffId: parsed.selectedStaffId ?? (user.staffId || null),
+            selectedHospitalId: hospitalMatches ? (restoredHospitalId ?? (user.hospitalId || null)) : (user.hospitalId || null),
+            selectedDepartmentId: departmentMatches ? (restoredDepartmentId ?? (user.departmentId || null)) : (user.departmentId || null),
+            selectedStaffId: staffMatches ? (restoredStaffId ?? (user.staffId || null)) : (user.staffId || null),
             depth: typeof parsed.depth === 'number' ? parsed.depth : 0,
           }
         };
@@ -246,6 +294,18 @@ const getInitialSession = (): { user: LoggedInUser | null; nav: NavigationState 
 
   switch (user.role) {
     case UserRole.Admin:
+      return {
+        user,
+        nav: {
+          appScreen: AppScreen.SuperAdmin,
+          currentView: View.DepartmentList,
+          selectedHospitalId: null,
+          selectedDepartmentId: null,
+          selectedStaffId: null,
+          depth: 0,
+        }
+      };
+    case UserRole.ProvincialOfficer:
       return {
         user,
         nav: {
@@ -353,6 +413,17 @@ const App: React.FC = () => {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [provinces, setProvinces] = useState<string[]>(() => db.getProvincesFromLocal(db.getHospitalsFromLocal()));
+  const [officers, setOfficers] = useState<ProvincialOfficer[]>(() => db.getOfficersFromLocal());
+  const [archivedArticles, setArchivedArticles] = useState<ArchivedArticleTemplate[]>(() => db.getArchivedArticlesFromLocal());
+  const [aboutInfo, setAboutInfo] = useState<AppAboutInfo>(() => db.getAboutInfoFromLocal());
+  const [appIconUrl, setAppIconUrl] = useState<string>(() => db.getAppIconFromLocal());
+  const [provinceFilter, setProvinceFilter] = useState<string>('all');
+
+  useEffect(() => {
+    db.updateDomFavicons(appIconUrl);
+  }, [appIconUrl]);
   
   const [activeYear, setActiveYear] = useState<number>(getInitialActiveYear());
 
@@ -410,6 +481,17 @@ const App: React.FC = () => {
       console.error("Could not sync session to localStorage", e);
     }
   }, [loggedInUser, appScreen, currentView, selectedHospitalId, selectedDepartmentId, selectedStaffId]);
+
+  // Enforce hospital deactivation on active session: if a user's hospital is deactivated, immediately log them out
+  useEffect(() => {
+    if (loggedInUser && loggedInUser.hospitalId && hospitals.length > 0 && loggedInUser.role !== UserRole.Admin) {
+      const userHosp = hospitals.find(h => h.id === loggedInUser.hospitalId);
+      if (userHosp && userHosp.isActive === false) {
+        handleLogout();
+        alert('دسترسی شما بصورت موقت غیرفعال شده است و برای کسب اطلاعات بیشتر با مدیریت سامانه تماس بگیرید');
+      }
+    }
+  }, [hospitals, loggedInUser]);
 
   // Phone back button and browser history listener
   useEffect(() => {
@@ -596,6 +678,20 @@ const App: React.FC = () => {
     refreshData();
   };
 
+  const handleToggleHospitalStatus = async (hospitalId: string, isActive: boolean) => {
+    const hospital = findHospital(hospitalId);
+    if (!hospital) return;
+    const updated: Hospital = { ...hospital, isActive };
+    setIsLoading(true);
+    const { error } = await db.upsertHospital(updated);
+    setIsLoading(false);
+    if (error) {
+      alert(`خطا در تغییر وضعیت فعالیت بیمارستان: ${error.message}`);
+    } else {
+      await refreshData();
+    }
+  };
+
   const handleAddDepartment = async (name: string, managerName: string, managerNationalId: string, managerPassword: string, staffCount: number, bedCount: number) => {
     if (!selectedHospitalId) return;
     const newDepartment: Department = { id: Date.now().toString(), name, managerName, managerNationalId, managerPassword, staffCount, bedCount, staff: [] };
@@ -606,7 +702,7 @@ const App: React.FC = () => {
   
   const handleAddStaff = async (departmentId: string, name: string, title: string, nationalId: string, password?: string) => {
     const newStaff: StaffMember = { id: Date.now().toString(), name, title, nationalId, password, assessments: [] };
-    const { error } = await db.upsertStaff(newStaff, departmentId);
+    const { error } = await db.upsertStaff(newStaff, departmentId, selectedHospitalId!);
     if (error) alert(`خطا در ذخیره ابری: ${error.message}`);
     refreshData();
   };
@@ -625,7 +721,7 @@ const App: React.FC = () => {
               maxScore: template?.maxScore,
               examSubmissions: existingAssessment?.examSubmissions || [],
           };
-          const { error } = await db.upsertAssessment(newAssessment, staffId);
+          const { error } = await db.upsertAssessment(newAssessment, staffId, selectedHospitalId!);
           if (error) alert(`خطا در ذخیره ابری: ${error.message}`);
           refreshData();
       }
@@ -644,7 +740,7 @@ const App: React.FC = () => {
           if (existingSubIdx > -1) assessment.examSubmissions[existingSubIdx] = submission;
           else assessment.examSubmissions.push(submission);
           
-          const { error } = await db.upsertAssessment(assessment, staffId);
+          const { error } = await db.upsertAssessment(assessment, staffId, selectedHospitalId!);
           if (error) alert(`خطا در ذخیره ابری: ${error.message}`);
           refreshData();
       }
@@ -668,7 +764,7 @@ const App: React.FC = () => {
       const staff = findStaffMember(department, staffId);
       if (staff) {
           const updatedStaff = { ...staff, ...data };
-          const { error } = await db.upsertStaff(updatedStaff, departmentId);
+          const { error } = await db.upsertStaff(updatedStaff, departmentId, selectedHospitalId!);
           if (error) alert(`خطا در ذخیره ابری: ${error.message}`);
           refreshData();
       }
@@ -723,7 +819,7 @@ const App: React.FC = () => {
           } else {
               staff.workLogs.push(workLog);
           }
-          const { error } = await db.upsertStaff(staff, departmentId);
+          const { error } = await db.upsertStaff(staff, departmentId, selectedHospitalId!);
           if (error) alert(`Error saving work log: ${error.message}`);
           else refreshData();
       }
@@ -733,11 +829,13 @@ const App: React.FC = () => {
         const hospital = findHospital(selectedHospitalId);
         if (!hospital) return false;
 
+        // The admin is already an authenticated session at this point (loggedInUser.role
+        // was verified at login against the hashed credential in services/db.ts), so no
+        // plaintext admin ID needs to be compared here again.
         const isAdmin = loggedInUser?.role === UserRole.Admin;
-        const adminId = '5850008985';
 
         const isSupervisorMatch = hospital.supervisorNationalId === supervisorNationalId;
-        const isAdminOverride = isAdmin && supervisorNationalId === adminId;
+        const isAdminOverride = isAdmin;
         
         if (isSupervisorMatch || isAdminOverride) {
             setIsLoading(true);
@@ -765,7 +863,7 @@ const App: React.FC = () => {
           if (assessment) {
               assessment.supervisorMessage = messages.supervisorMessage;
               assessment.managerMessage = messages.managerMessage;
-              const { error } = await db.upsertAssessment(assessment, staffId);
+              const { error } = await db.upsertAssessment(assessment, staffId, selectedHospitalId!);
               if (error) alert(`خطا در ذخیره پیام‌ها: ${error.message}`);
               else refreshData();
           }
@@ -851,23 +949,57 @@ const App: React.FC = () => {
       if (error) alert(`Error: ${error.message}`); else refreshData();
     }
   };
+
+  const handleSaveStaffChecklistEvaluation = async (staffId: string, evaluation: StaffChecklistEvaluation) => {
+    if (!selectedHospitalId || !selectedDepartmentId) return;
+    const hospital = findHospital(selectedHospitalId);
+    const department = findDepartment(hospital, selectedDepartmentId);
+    if (!department) return;
+    const staff = findStaffMember(department, staffId);
+    if (!staff) return;
+
+    if (!staff.checklistEvaluations) {
+      staff.checklistEvaluations = [];
+    }
+    const existingIdx = staff.checklistEvaluations.findIndex(e => e.id === evaluation.id);
+    if (existingIdx > -1) {
+      staff.checklistEvaluations[existingIdx] = evaluation;
+    } else {
+      staff.checklistEvaluations.unshift(evaluation);
+    }
+
+    const { error } = await db.upsertDepartment(department, selectedHospitalId);
+    if (error) alert(`خطا در ذخیره ارزیابی چک‌لیست: ${error.message}`);
+    else refreshData();
+  };
   
     const handleAddTrainingMaterial = async (departmentId: string, month: string, fileData: FileUploadData) => {
         if (!selectedHospitalId) return;
-        const { path, error: uploadError } = await db.uploadFileFromDataUrl(fileData.dataUrl, fileData.name);
-        if (uploadError) {
-            alert(`خطا در آپلود فایل: ${uploadError.message}`);
-            return;
+
+        let path = '';
+        if (fileData.dataUrl && fileData.dataUrl.trim().length > 0) {
+            const { path: uploadedPath, error: uploadError } = await db.uploadFileFromDataUrl(fileData.dataUrl, fileData.name);
+            if (uploadError) {
+                alert(`خطا در آپلود فایل: ${uploadError.message}`);
+                return;
+            }
+            path = uploadedPath;
         }
         
         const newMaterial: TrainingMaterial = {
-            id: Date.now().toString(), name: fileData.name, type: fileData.type,
-            storagePath: path, description: fileData.description
+            id: Date.now().toString(),
+            name: fileData.name,
+            type: fileData.type,
+            storagePath: path,
+            description: fileData.description,
+            createdAt: new Date().toISOString(),
+            articleContent: fileData.articleContent,
+            videoUrl: fileData.videoUrl,
         };
 
         const { error: saveError } = await db.addTrainingMaterial(selectedHospitalId, departmentId, month, newMaterial);
         if (saveError) {
-            await db.deleteFile(path); // Cleanup on error
+            if (path) await db.deleteFile(path); // Cleanup on error
             alert(`خطا در ذخیره اطلاعات فایل: ${saveError.message}`);
         } else {
             refreshData();
@@ -909,7 +1041,14 @@ const App: React.FC = () => {
             alert(`خطا در آپلود فایل: ${uploadError.message}`);
             return;
         }
-        const newMaterial: TrainingMaterial = { id: Date.now().toString(), name: fileData.name, type: fileData.type, storagePath: path, description: fileData.description };
+        const newMaterial: TrainingMaterial = {
+          id: Date.now().toString(),
+          name: fileData.name,
+          type: fileData.type,
+          storagePath: path,
+          description: fileData.description,
+          createdAt: new Date().toISOString(),
+        };
         
         const { error: saveError } = await db.addAccreditationMaterial(selectedHospitalId, newMaterial);
         if (saveError) {
@@ -1160,6 +1299,11 @@ const App: React.FC = () => {
   };
 
   const handleSelectHospital = (id: string) => {
+    const hospital = findHospital(id);
+    if (hospital && hospital.isActive === false && loggedInUser?.role !== UserRole.Admin) {
+      alert('دسترسی شما بصورت موقت غیرفعال شده است و برای کسب اطلاعات بیشتر با مدیریت سامانه تماس بگیرید');
+      return;
+    }
     navigateForward(AppScreen.MainApp, View.DepartmentList, id, null, null);
   };
 
@@ -1261,13 +1405,27 @@ const App: React.FC = () => {
     }
   };
 
-  const handleLogin = async (nationalId: string, password: string) => {
+  const handleLogin = async (nationalId: string, password: string, hospitalId?: string) => {
       setLoginError(null);
       if (!nationalId || !password) { setLoginError('کد ملی و رمز عبور الزامی است.'); return; }
-      
-      const user = db.findUser(hospitals, nationalId, password);
-      
+
+      const user = await db.findUser(hospitals, nationalId, password, hospitalId);
+
+      if (!user && !hospitalId) {
+          setLoginError('لطفاً ابتدا بیمارستان خود را از لیست انتخاب کنید.');
+          return;
+      }
+
       if(user) {
+          // Check if user's hospital has been temporarily deactivated
+          if (user.hospitalId && user.role !== UserRole.Admin) {
+            const userHospital = findHospital(user.hospitalId) || hospitals.find(h => h.id === user.hospitalId);
+            if (userHospital && userHospital.isActive === false) {
+              setLoginError('دسترسی شما بصورت موقت غیرفعال شده است و برای کسب اطلاعات بیشتر با مدیریت سامانه تماس بگیرید');
+              return;
+            }
+          }
+
           setLoggedInUser(user);
           setIsLoginModalOpen(false);
 
@@ -1279,8 +1437,15 @@ const App: React.FC = () => {
 
           switch(user.role) {
             case UserRole.Admin:
+              targetScreen = AppScreen.SuperAdmin;
+              targetView = View.DepartmentList;
+              break;
+            case UserRole.ProvincialOfficer:
               targetScreen = AppScreen.HospitalList;
               targetView = View.DepartmentList;
+              if (user.province) {
+                setProvinceFilter(user.province);
+              }
               break;
             case UserRole.Supervisor:
               targetScreen = AppScreen.MainApp;
@@ -1448,6 +1613,132 @@ const App: React.FC = () => {
       reader.readAsText(file);
   };
 
+  // --- Super Admin Action Handlers ---
+  const handleSaveAppIcon = (iconUrl: string) => {
+    setAppIconUrl(iconUrl);
+    db.saveAppIcon(iconUrl);
+    alert('آیکون سامانه با موفقیت ذخیره شد و برای انواع دستگاه‌ها (کامپیوتر، آیفون و اندروید) تنظیم گردید.');
+  };
+
+  const handleAddProvince = (provinceName: string) => {
+    const updated = [...provinces, provinceName];
+    setProvinces(updated);
+    db.saveProvinces(updated);
+  };
+
+  const handleDeleteProvince = (provinceName: string) => {
+    const updated = provinces.filter(p => p !== provinceName);
+    setProvinces(updated);
+    db.saveProvinces(updated);
+  };
+
+  const handleAddOfficer = (officerData: Omit<ProvincialOfficer, 'id' | 'createdAt'>) => {
+    const newOfficer: ProvincialOfficer = {
+      ...officerData,
+      id: `off-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+    };
+    const updated = [...officers, newOfficer];
+    setOfficers(updated);
+    db.saveOfficers(updated);
+    alert(`کارشناس معاونت درمان (${newOfficer.name}) با موفقیت ثبت شد.`);
+  };
+
+  const handleDeleteOfficer = (id: string) => {
+    const updated = officers.filter(o => o.id !== id);
+    setOfficers(updated);
+    db.saveOfficers(updated);
+  };
+
+  const handleSaveAboutInfo = (info: AppAboutInfo) => {
+    setAboutInfo(info);
+    db.saveAboutInfo(info);
+  };
+
+  const handleInjectArticle = async (hospitalId: string, departmentId: string | 'all', article: ArchivedArticleTemplate) => {
+    const hospital = findHospital(hospitalId);
+    if (!hospital) return;
+
+    const newMaterial: TrainingMaterial = {
+      id: `inj-${Date.now()}`,
+      name: article.title,
+      type: 'article',
+      storagePath: '',
+      description: article.description,
+      articleContent: article.content,
+      videoUrl: article.videoUrl,
+      createdAt: new Date().toISOString(),
+    };
+
+    const targetDepts = departmentId === 'all'
+      ? hospital.departments
+      : hospital.departments.filter(d => d.id === departmentId);
+
+    targetDepts.forEach(dept => {
+      if (!dept.trainingMaterials) dept.trainingMaterials = [];
+      let defaultGroup = dept.trainingMaterials.find(m => m.month === 'عمومی');
+      if (!defaultGroup) {
+        defaultGroup = { month: 'عمومی', materials: [] };
+        dept.trainingMaterials.unshift(defaultGroup);
+      }
+      defaultGroup.materials.unshift(newMaterial);
+    });
+
+    const { error } = await db.upsertHospital(hospital);
+    if (error) alert(`خطا در تزریق محتوا: ${error.message}`);
+    else {
+      refreshData();
+    }
+  };
+
+  const handleInjectChecklist = async (hospitalId: string, departmentId: string | 'all', checklist: NamedChecklistTemplate) => {
+    const hospital = findHospital(hospitalId);
+    if (!hospital) return;
+
+    const newTemplate: NamedChecklistTemplate = {
+      ...checklist,
+      id: `injected-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      createdAt: new Date().toISOString(),
+    };
+
+    if (departmentId === 'all') {
+      if (!hospital.checklistTemplates) hospital.checklistTemplates = [];
+      hospital.checklistTemplates.unshift(newTemplate);
+    } else {
+      const dept = hospital.departments.find(d => d.id === departmentId);
+      if (dept) {
+        if (!dept.checklistTemplates) dept.checklistTemplates = [];
+        dept.checklistTemplates.unshift(newTemplate);
+      }
+    }
+
+    const { error } = await db.upsertHospital(hospital);
+    if (error) alert(`خطا در تزریق چک‌لیست: ${error.message}`);
+    else {
+      refreshData();
+    }
+  };
+
+  const handleInjectExam = async (hospitalId: string, departmentId: string | 'all', exam: ExamTemplate) => {
+    const hospital = findHospital(hospitalId);
+    if (!hospital) return;
+
+    const newExam: ExamTemplate = {
+      ...exam,
+      id: `injected-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      createdAt: new Date().toISOString(),
+    };
+
+    if (!hospital.examTemplates) hospital.examTemplates = [];
+    hospital.examTemplates.unshift(newExam);
+
+    const { error } = await db.upsertHospital(hospital);
+    if (error) alert(`خطا در تزریق آزمون: ${error.message}`);
+    else {
+      refreshData();
+    }
+  };
+
   const renderMainContent = () => {
     const renderUnauthorized = () => {
         handleLogout();
@@ -1465,11 +1756,72 @@ const App: React.FC = () => {
       );
     }
 
-    if (appScreen === AppScreen.HospitalList) {
+    // --- Super Admin Hub ---
+    if (appScreen === AppScreen.SuperAdmin) {
       if (loggedInUser.role !== UserRole.Admin) return renderUnauthorized();
 
       if (currentView === View.AdminCommunication) {
-        return <AdminCommunicationView hospitals={hospitals} onSendMessage={(hospitalId, content) => handleAdminOrHospitalMessageSend(hospitalId, 'admin', content)} onBack={handleBack} onRefreshChat={refreshData} />;
+        return (
+          <IMessageChatView
+            isAdmin={true}
+            hospitals={hospitals}
+            onSendMessage={(hospitalId, content) => handleAdminOrHospitalMessageSend(hospitalId, 'admin', content)}
+            onBack={handleBack}
+            onRefreshChat={refreshData}
+          />
+        );
+      }
+
+      const allChecklists = hospitals.flatMap(h => h.checklistTemplates || []);
+      const allExams = hospitals.flatMap(h => h.examTemplates || []);
+
+      return (
+        <SuperAdminDashboard
+          hospitals={hospitals}
+          provinces={provinces}
+          officers={officers}
+          archivedArticles={archivedArticles}
+          archivedChecklists={allChecklists}
+          archivedExams={allExams}
+          aboutInfo={aboutInfo}
+          appIconUrl={appIconUrl}
+          onSaveAppIcon={handleSaveAppIcon}
+          onAddProvince={handleAddProvince}
+          onDeleteProvince={handleDeleteProvince}
+          onAddOfficer={handleAddOfficer}
+          onDeleteOfficer={handleDeleteOfficer}
+          onSaveAboutInfo={handleSaveAboutInfo}
+          onInjectArticle={handleInjectArticle}
+          onInjectChecklist={handleInjectChecklist}
+          onInjectExam={handleInjectExam}
+          onOpenChat={() => openSubView(View.AdminCommunication)}
+          onGoToHospitalList={(filterProvince) => {
+            if (filterProvince) setProvinceFilter(filterProvince);
+            else setProvinceFilter('all');
+            navigateForward(AppScreen.HospitalList, View.DepartmentList, null, null, null);
+          }}
+          onToggleHospitalStatus={handleToggleHospitalStatus}
+          onLogout={handleLogout}
+        />
+      );
+    }
+
+    // --- Hospital List Screen (Admin & Provincial Officer) ---
+    if (appScreen === AppScreen.HospitalList) {
+      if (loggedInUser.role !== UserRole.Admin && loggedInUser.role !== UserRole.ProvincialOfficer) {
+        return renderUnauthorized();
+      }
+
+      if (currentView === View.AdminCommunication) {
+        return (
+          <IMessageChatView
+            isAdmin={true}
+            hospitals={hospitals}
+            onSendMessage={(hospitalId, content) => handleAdminOrHospitalMessageSend(hospitalId, 'admin', content)}
+            onBack={handleBack}
+            onRefreshChat={refreshData}
+          />
+        );
       }
       
       return <HospitalList
@@ -1492,8 +1844,41 @@ const App: React.FC = () => {
         onSelectHospital={handleSelectHospital}
         onGoToWelcome={handleGoToWelcome}
         userRole={loggedInUser.role}
-        onContactAdmin={() => openSubView(View.AdminCommunication)}
+        userProvince={loggedInUser.province}
+        initialProvinceFilter={provinceFilter}
+        onGoToSuperAdmin={() => {
+          navigateForward(AppScreen.SuperAdmin, View.DepartmentList, null, null, null);
+        }}
       />;
+    }
+
+    // Hard safety guard: whatever selectedHospitalId/selectedDepartmentId/selectedStaffId
+    // currently are in memory, a non-Admin/non-ProvincialOfficer user may only ever be shown their OWN
+    // hospital/department/staff record.
+    if (
+      loggedInUser.role !== UserRole.Admin &&
+      loggedInUser.role !== UserRole.ProvincialOfficer &&
+      loggedInUser.hospitalId &&
+      selectedHospitalId &&
+      selectedHospitalId !== loggedInUser.hospitalId
+    ) {
+      return renderUnauthorized();
+    }
+    if (
+      (loggedInUser.role === UserRole.Manager || loggedInUser.role === UserRole.Staff || loggedInUser.role === UserRole.Patient) &&
+      loggedInUser.departmentId &&
+      selectedDepartmentId &&
+      selectedDepartmentId !== loggedInUser.departmentId
+    ) {
+      return renderUnauthorized();
+    }
+    if (
+      loggedInUser.role === UserRole.Staff &&
+      loggedInUser.staffId &&
+      selectedStaffId &&
+      selectedStaffId !== loggedInUser.staffId
+    ) {
+      return renderUnauthorized();
     }
 
     const selectedHospital = findHospital(selectedHospitalId);
@@ -1520,10 +1905,11 @@ const App: React.FC = () => {
           hospital={selectedHospital}
           onAddDepartment={handleAddDepartment}
           onUpdateDepartment={handleUpdateDepartment}
-          onDeleteDepartment={async (id) => await db.deleteDepartment(id).then(res => !res.error && refreshData())}
+          onDeleteDepartment={async (id) => await db.deleteDepartment(id, selectedHospital.id).then(res => !res.error && refreshData())}
           onSelectDepartment={handleSelectDepartment} onBack={handleBack} onManageAccreditation={() => openSubView(View.AccreditationManager)}
           onManageNewsBanners={() => openSubView(View.NewsBannerManager)} onManageNeedsAssessment={() => openSubView(View.NeedsAssessmentManager)}
           onManageCorrectiveActions={() => openSubView(View.CorrectiveActions)}
+          onManageSensitiveIndicators={() => openSubView(View.SensitiveIndicators)}
           onResetHospital={handleResetHospital} onContactAdmin={() => openSubView(View.HospitalCommunication)}
           onArchiveYear={handleArchiveYear} userRole={loggedInUser.role} onReplaceHospitalData={handleReplaceHospitalData}
         />;
@@ -1541,7 +1927,7 @@ const App: React.FC = () => {
         }
         return <DepartmentView
           department={selectedDepartment} hospitalId={selectedHospital.id} onBack={handleBack} onAddStaff={handleAddStaff} onUpdateStaff={handleUpdateStaff}
-          onDeleteStaff={async (deptId, staffId) => await db.deleteStaff(staffId).then(res => !res.error && refreshData())}
+          onDeleteStaff={async (deptId, staffId) => await db.deleteStaff(staffId, selectedHospital.id).then(res => !res.error && refreshData())}
           onSelectStaff={handleSelectStaff} onComprehensiveImport={handleComprehensiveImport}
           onManageChecklists={() => openSubView(View.ChecklistManager)} onManageExams={() => openSubView(View.ExamManager)}
           onManageTraining={() => openSubView(View.TrainingManager)} onManagePatientEducation={() => openSubView(View.PatientEducationManager)}
@@ -1575,7 +1961,20 @@ const App: React.FC = () => {
       case View.ChecklistManager:
         return <ChecklistManager templates={selectedHospital.checklistTemplates || []} onAddOrUpdate={handleAddOrUpdateChecklistTemplate} onDelete={handleDeleteChecklistTemplate} onBack={handleBack} />;
       case View.ExamManager:
-        return <ExamManager templates={selectedHospital.examTemplates || []} onAddOrUpdate={handleAddOrUpdateExamTemplate} onDelete={handleDeleteExamTemplate} onBack={handleBack} />;
+        return (
+          <ExamManager
+            templates={selectedHospital.examTemplates || []}
+            checklistTemplates={selectedHospital.checklistTemplates || []}
+            department={selectedDepartment}
+            staffList={selectedDepartment?.staff || []}
+            onAddOrUpdateExam={handleAddOrUpdateExamTemplate}
+            onDeleteExam={handleDeleteExamTemplate}
+            onAddOrUpdateChecklistTemplate={handleAddOrUpdateChecklistTemplate}
+            onDeleteChecklistTemplate={handleDeleteChecklistTemplate}
+            onSaveStaffChecklistEvaluation={(staffId, evaluation) => handleSaveStaffChecklistEvaluation(staffId, evaluation)}
+            onBack={handleBack}
+          />
+        );
       case View.TrainingManager:
         if (!selectedDepartment) return <div>Department not found.</div>;
         return <TrainingManager 
@@ -1600,10 +1999,27 @@ const App: React.FC = () => {
         if (!dept || !patient) return <div>اطلاعات بیمار یافت نشد.</div>;
         return <PatientPortalView department={dept} patient={patient} onSendMessage={(content) => handleChatMessageSend(loggedInUser.hospitalId!, loggedInUser.departmentId!, patient.id, 'patient', content)} onRefreshChat={refreshData} />;
       case View.HospitalCommunication:
-        return <HospitalCommunicationView hospital={selectedHospital} onSendMessage={(content) => handleAdminOrHospitalMessageSend(selectedHospital.id, 'hospital', content)} onBack={handleBack} onRefreshChat={refreshData} />;
+        return (
+          <IMessageChatView
+            isAdmin={false}
+            hospitals={[selectedHospital]}
+            currentHospital={selectedHospital}
+            onSendMessage={(hospitalId, content) => handleAdminOrHospitalMessageSend(hospitalId, 'hospital', content)}
+            onBack={handleBack}
+            onRefreshChat={refreshData}
+          />
+        );
       case View.AdminCommunication:
         if (loggedInUser.role !== UserRole.Admin) return renderUnauthorized();
-        return <AdminCommunicationView hospitals={hospitals} onSendMessage={(hospitalId, content) => handleAdminOrHospitalMessageSend(hospitalId, 'admin', content)} onBack={handleBack} onRefreshChat={refreshData} />;
+        return (
+          <IMessageChatView
+            isAdmin={true}
+            hospitals={hospitals}
+            onSendMessage={(hospitalId, content) => handleAdminOrHospitalMessageSend(hospitalId, 'admin', content)}
+            onBack={handleBack}
+            onRefreshChat={refreshData}
+          />
+        );
       case View.NeedsAssessmentManager:
         return <NeedsAssessmentManager hospital={selectedHospital} onUpdateTopics={handleUpdateNeedsAssessmentTopics} onBack={handleBack} activeYear={activeYear} />;
       case View.CorrectiveActions:
@@ -1617,6 +2033,20 @@ const App: React.FC = () => {
           userRole={loggedInUser.role}
           activeYear={activeYear}
         />;
+      case View.SensitiveIndicators:
+        return (
+          <SensitiveIndicatorsView
+            hospital={selectedHospital}
+            onBack={handleBack}
+            onSaveReport={(report: SensitiveIndicatorsReport) => {
+              const updatedHospital = {
+                ...selectedHospital,
+                sensitiveIndicatorsReport: report,
+              };
+              handleReplaceHospitalData(updatedHospital);
+            }}
+          />
+        );
       default:
         return <div>Unhandled view state.</div>;
     }
@@ -1638,13 +2068,13 @@ const App: React.FC = () => {
             <Suspense fallback={<LoadingSpinner />}>
               <WelcomeScreen onEnter={() => setIsLoginModalOpen(true)} />
             </Suspense>
-            <AboutModal isOpen={isAboutModalOpen} onClose={() => setIsAboutModalOpen(false)} />
-            <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} onLogin={handleLogin} loginError={loginError} />
+            <AboutModal isOpen={isAboutModalOpen} onClose={() => setIsAboutModalOpen(false)} aboutInfo={aboutInfo} />
+            <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} onLogin={handleLogin} loginError={loginError} hospitals={hospitals} />
           </>
       );
   }
 
-  const showHeader = loggedInUser?.role !== UserRole.Patient;
+  const showHeader = loggedInUser?.role !== UserRole.Patient && appScreen !== AppScreen.SuperAdmin;
 
   return (
     <div className={`min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300 flex flex-col ${showHeader ? 'pt-16' : ''}`}>
@@ -1695,8 +2125,8 @@ const App: React.FC = () => {
           </Suspense>
         </main>
         <Footer />
-        <AboutModal isOpen={isAboutModalOpen} onClose={() => setIsAboutModalOpen(false)} />
-        <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} onLogin={handleLogin} loginError={loginError} />
+        <AboutModal isOpen={isAboutModalOpen} onClose={() => setIsAboutModalOpen(false)} aboutInfo={aboutInfo} />
+        <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} onLogin={handleLogin} loginError={loginError} hospitals={hospitals} />
     </div>
   );
 };

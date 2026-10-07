@@ -34,6 +34,33 @@ export interface MonthlyWorkLog {
   workExperienceInYears?: number;
 }
 
+export interface StaffChecklistEvaluation {
+  id: string;
+  templateId: string;
+  templateName: string;
+  evaluatorName: string;
+  date: string;
+  year: number;
+  month?: string;
+  overallScore: number;
+  maxScore: number;
+  percentage: number;
+  notes?: string;
+  categories: {
+    name: string;
+    items: {
+      description: string;
+      score: number;
+      maxScore: number;
+      responseType?: ChecklistResponseType;
+      selectedOption?: string;
+      comment?: string;
+    }[];
+    categoryScore: number;
+    categoryMaxScore: number;
+  }[];
+}
+
 export interface StaffMember {
   id: string;
   name: string;
@@ -42,11 +69,31 @@ export interface StaffMember {
   password?: string;
   assessments: Assessment[];
   workLogs?: MonthlyWorkLog[];
+  checklistEvaluations?: StaffChecklistEvaluation[];
+}
+
+export type ChecklistResponseType = 'descriptive' | 'multiple_choice' | 'qualitative';
+
+export interface ChecklistOption {
+  text: string;
+  score: number;
+}
+
+export interface ChecklistQualitativeLevel {
+  label: string;
+  score: number;
+  color?: string;
 }
 
 export interface ChecklistItemTemplate {
   id: string;
   description: string;
+  responseType?: ChecklistResponseType;
+  maxScore?: number;
+  options?: ChecklistOption[];
+  qualitativeScale?: '5_scale' | '3_scale' | 'custom';
+  qualitativeLevels?: ChecklistQualitativeLevel[];
+  helpText?: string;
 }
 
 export interface ChecklistCategoryTemplate {
@@ -61,6 +108,7 @@ export interface NamedChecklistTemplate {
   categories: ChecklistCategoryTemplate[];
   minScore?: number;
   maxScore?: number;
+  createdAt?: string;
 }
 
 export enum QuestionType {
@@ -80,7 +128,11 @@ export interface ExamTemplate {
   id: string;
   name: string;
   questions: Question[];
-  month?: string; // Month for the exam, or 'عمومی' for all months
+  month?: string; // Optional/legacy
+  createdAt?: string;
+  isActive?: boolean; // Active or inactive status
+  questionCountToDisplay?: number; // Number of questions to randomly display (e.g. 10 out of 30)
+  randomizeQuestions?: boolean; // Shuffle question order and options
 }
 
 export interface ExamAnswer {
@@ -146,14 +198,18 @@ export interface Department {
   trainingMaterials?: MonthlyTraining[]; // Moved from Hospital to here
   patients?: Patient[];
   correctiveActions?: CustomCorrectiveAction[];
+  checklistTemplates?: NamedChecklistTemplate[];
 }
 
 export interface TrainingMaterial {
   id: string;
   name: string;
-  type: string; // Mime type
+  type: string; // Mime type or 'article'
   storagePath: string; 
   description?: string;
+  createdAt?: string;
+  articleContent?: string; // Rich article HTML with formatted text, images, videos, and links
+  videoUrl?: string; // Optional direct video URL (e.g. MP4 link or Aparat link)
 }
 
 export interface MonthlyTraining {
@@ -202,6 +258,78 @@ export interface MonthlyNeedsAssessment {
 }
 
 
+export interface SensitiveIndicatorPeriodData {
+  numerator?: number | null;
+  denominator?: number | null;
+  rate?: number | null;
+}
+
+export interface SensitiveIndicatorDeptRow {
+  radif?: number;
+  departmentName: string;
+  spring?: SensitiveIndicatorPeriodData;
+  summer?: SensitiveIndicatorPeriodData;
+  autumn?: SensitiveIndicatorPeriodData;
+  winter?: SensitiveIndicatorPeriodData;
+  firstHalf?: SensitiveIndicatorPeriodData;
+  secondHalf?: SensitiveIndicatorPeriodData;
+  annual?: SensitiveIndicatorPeriodData;
+}
+
+export interface SensitiveIndicatorDetail {
+  sheetName: string;
+  title: string;
+  pattern: 'A' | 'A2' | 'B' | 'C';
+  description?: string;
+  numeratorLabel?: string;
+  denominatorLabel?: string;
+  departments: SensitiveIndicatorDeptRow[];
+  allStaffSummary?: {
+    spring?: number | null;
+    summer?: number | null;
+    autumn?: number | null;
+    winter?: number | null;
+    firstHalf?: number | null;
+    secondHalf?: number | null;
+    annual?: number | null;
+  };
+  overallSummary?: {
+    spring?: number | null;
+    summer?: number | null;
+    autumn?: number | null;
+    winter?: number | null;
+    firstHalf?: number | null;
+    secondHalf?: number | null;
+    annual?: number | null;
+  };
+}
+
+export interface SensitiveIndicatorsReport {
+  hospitalInfo: {
+    year?: string;
+    university?: string;
+    hospitalName?: string;
+    ownershipType?: string;
+    inpatientDeptCount?: number;
+    outpatientUnitCount?: number;
+  };
+  inpatientDepts: string[];
+  outpatientUnits: string[];
+  overview: Array<{
+    indicatorName: string;
+    spring?: number | null;
+    summer?: number | null;
+    autumn?: number | null;
+    winter?: number | null;
+    firstHalf?: number | null;
+    secondHalf?: number | null;
+    annual?: number | null;
+  }>;
+  indicators: SensitiveIndicatorDetail[];
+  aiAnalysis?: string;
+  uploadedAt?: string;
+}
+
 export interface Hospital {
   id: string;
   name: string;
@@ -217,12 +345,45 @@ export interface Hospital {
   newsBanners?: NewsBanner[];
   adminMessages?: AdminMessage[];
   needsAssessments?: MonthlyNeedsAssessment[];
+  sensitiveIndicatorsReport?: SensitiveIndicatorsReport;
+  isActive?: boolean;
+}
+
+export interface ProvincialOfficer {
+  id: string;
+  name: string;
+  nationalId: string;
+  password: string;
+  province: string;
+  createdAt?: string;
+}
+
+export interface ArchivedArticleTemplate {
+  id: string;
+  title: string;
+  description?: string;
+  content: string;
+  videoUrl?: string;
+  createdAt: string;
+  authorName?: string;
+}
+
+export interface AppAboutInfo {
+  title: string;
+  description: string;
+  features: string[];
+  closingPoem?: string;
+  creatorName: string;
+  creatorEmail: string;
+  aparatUrl: string;
+  version: string;
 }
 
 export enum AppScreen {
   Welcome,
   HospitalList,
   MainApp,
+  SuperAdmin,
 }
 
 export enum View {
@@ -240,6 +401,7 @@ export enum View {
   AdminCommunication,
   NeedsAssessmentManager,
   CorrectiveActions,
+  SensitiveIndicators,
 }
 
 export enum UserRole {
@@ -248,6 +410,7 @@ export enum UserRole {
   Manager,
   Staff,
   Patient,
+  ProvincialOfficer,
 }
 
 export interface LoggedInUser {
@@ -257,4 +420,6 @@ export interface LoggedInUser {
   departmentId?: string;
   staffId?: string;
   patientId?: string;
+  province?: string;
+  officerId?: string;
 }
