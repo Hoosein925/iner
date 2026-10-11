@@ -187,6 +187,27 @@ function parseMarkdownToDocxElements(md: string): (Paragraph | Table)[] {
         })
       );
     }
+    // Heading 4: #### Individual Staff Profile
+    else if (line.startsWith('#### ')) {
+      elements.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: '👤 ' + line.replace('#### ', ''),
+              bold: true,
+              size: 22, // 11pt
+              color: '1e1b4b',
+              rightToLeft: true,
+              font: 'Vazirmatn',
+            }),
+          ],
+          heading: HeadingLevel.HEADING_4,
+          alignment: AlignmentType.RIGHT,
+          bidirectional: true,
+          spacing: { before: 140, after: 60 },
+        })
+      );
+    }
     // Blockquote or note: > Note
     else if (line.startsWith('> ')) {
       elements.push(

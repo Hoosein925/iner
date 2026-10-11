@@ -3,8 +3,39 @@ import { Hospital, LoggedInUser, UserRole, Department, StaffMember, Assessment, 
 // The type will be inferred from the supabase client instance.
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = (import.meta.env && import.meta.env.VITE_SUPABASE_URL) || 'https://npyujcxsmvwmydtfwjjo.supabase.co';
-const supabaseKey = (import.meta.env && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) || 'sb_publishable_6jxWVzEvwuaxCs2SdluLhw_QkDWrEP0';
+const DEFAULT_SUPABASE_URL = 'https://npyujcxsmvwmydtfwjjo.supabase.co';
+const DEFAULT_SUPABASE_KEY = 'sb_publishable_6jxWVzEvwuaxCs2SdluLhw_QkDWrEP0';
+
+export const getSupabaseConfig = (): { url: string; key: string } => {
+    try {
+        const customUrl = localStorage.getItem('custom_supabase_url');
+        const customKey = localStorage.getItem('custom_supabase_anon_key');
+        if (customUrl && customKey) {
+            return { url: customUrl.trim(), key: customKey.trim() };
+        }
+    } catch {
+        // fallback
+    }
+    const envUrl = (import.meta.env && import.meta.env.VITE_SUPABASE_URL) || DEFAULT_SUPABASE_URL;
+    const envKey = (import.meta.env && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) || DEFAULT_SUPABASE_KEY;
+    return { url: envUrl, key: envKey };
+};
+
+export const saveSupabaseConfig = (url: string, key: string) => {
+    localStorage.setItem('custom_supabase_url', url.trim());
+    localStorage.setItem('custom_supabase_anon_key', key.trim());
+    window.location.reload();
+};
+
+export const resetSupabaseConfig = () => {
+    localStorage.removeItem('custom_supabase_url');
+    localStorage.removeItem('custom_supabase_anon_key');
+    window.location.reload();
+};
+
+const currentConfig = getSupabaseConfig();
+const supabaseUrl = currentConfig.url;
+const supabaseKey = currentConfig.key;
 const supabase: SupabaseClient = createClient(supabaseUrl, supabaseKey);
 
 const BUCKET_NAME = 'app_files';
