@@ -137,8 +137,8 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
 
   const summaryText = extractSection(['شرح وضعیت بخش‌های بیمارستان', 'خلاصه مدیریتی', 'شرح کلی وضعیت', 'وضعیت کلی ارزیابی']);
   const axesText = extractSection(['شناسایی و کالبدشکافی بیشترین نقاط ضعف', 'نقاط ضعف مهارتی', 'محورهای اصلاحی', 'حیطه‌ها', 'سنجه‌ها']);
-  const actionText = extractSection(['جدول برنامه عملیاتی استراتژیک', 'برنامه عملیاتی', 'برنامه جامع اقدامات', 'برنامه کامل اقدامات', 'برنامه ۱ ماهه', 'برنامه ۳ ماهه']);
-  const individualText = extractSection(['ماتریس نقش‌ها و شرح وظایف', 'اشخاص پیگیرکننده', 'برنامه بهبود فردی', 'آموزش فردی', 'هدایت بالینی']);
+  const actionText = extractSection(['جدول برنامه عملیاتی استراتژیک', 'برنامه عملیاتی', 'برنامه جامع اقدامات', 'برنامه کامل اقدامات', 'برنامه ۱ ماهه', 'برنامه ۳ ماهه', 'ماتریس برنامه عملیاتی', 'ماتریس عملیاتی توانمندسازی']);
+  const individualText = extractSection(['ماتریس نقش‌ها و شرح وظایف', 'اشخاص پیگیرکننده', 'برنامه بهبود فردی', 'آموزش فردی', 'هدایت بالینی', 'ماتریس برنامه عملیاتی توانمندسازی', 'ماتریس عملیاتی توانمندسازی', 'شرح وضعیت مهارت‌ها']);
   const causesText = extractSection(['علل مستند', 'فرضیه‌ها', 'بررسی میدانی', 'کنترل کیفیت']);
   const timelineText = extractSection(['سازوکار نظارت، پایش دوره‌ای', 'سازوکار نظارت', 'پایش دوره‌ای', 'زمان‌بندی و مسئولیت', 'صفحه تأیید', 'تأیید و امضا', 'برنامه ۱ ساله']);
 
@@ -247,17 +247,53 @@ export const PeriodicPlanModal: React.FC<PeriodicPlanModalProps> = ({
         );
       } else if (trimmed.startsWith('### ')) {
         elements.push(
-          <h3 key={`h3-${i}`} className="text-base font-bold text-slate-800 dark:text-slate-200 mt-4 mb-1.5 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block"></span>
+          <h3 key={`h3-${i}`} className="text-base font-bold text-slate-800 dark:text-slate-200 mt-5 mb-2 flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 inline-block"></span>
             {trimmed.replace('### ', '')}
           </h3>
         );
-      } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+      } else if (trimmed.startsWith('#### ')) {
+        const staffHeader = trimmed.replace('#### ', '');
         elements.push(
-          <li key={`li-${i}`} className="mr-5 text-sm sm:text-base text-slate-700 dark:text-slate-300 my-1 leading-relaxed list-disc">
-            {renderBold(trimmed.substring(2))}
-          </li>
+          <div key={`h4-${i}`} className="mt-4 mb-2 p-2.5 sm:p-3 rounded-xl bg-gradient-to-r from-blue-50/95 via-indigo-50/80 to-slate-50 dark:from-indigo-950/40 dark:via-slate-800/60 dark:to-slate-800/40 border-r-4 border-indigo-600 border border-indigo-100 dark:border-indigo-900/40 flex items-center gap-2.5 shadow-xs">
+            <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow-xs shrink-0">
+              👤
+            </div>
+            <div className="font-black text-sm sm:text-base text-indigo-950 dark:text-indigo-200">
+              {renderBold(staffHeader)}
+            </div>
+          </div>
         );
+      } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+        const itemBody = trimmed.substring(2);
+        const isMentorLine = itemBody.includes('منتور') || itemBody.includes('مربی بالینی');
+        const isSkillStatusLine = itemBody.includes('شرح وضعیت مهارت') || itemBody.includes('میانگین شایستگی فردی');
+
+        if (isMentorLine) {
+          elements.push(
+            <div key={`li-mentor-${i}`} className="my-1.5 p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 text-xs sm:text-sm text-emerald-950 dark:text-emerald-200 flex items-start gap-2">
+              <span className="text-emerald-600 dark:text-emerald-400 font-bold shrink-0">🤝</span>
+              <div className="leading-relaxed">
+                {renderBold(itemBody)}
+              </div>
+            </div>
+          );
+        } else if (isSkillStatusLine) {
+          elements.push(
+            <div key={`li-skill-${i}`} className="my-1.5 p-2 rounded-lg bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-800/30 text-xs sm:text-sm text-indigo-950 dark:text-indigo-200 flex items-start gap-2">
+              <span className="text-indigo-600 dark:text-indigo-400 font-bold shrink-0">📊</span>
+              <div className="leading-relaxed">
+                {renderBold(itemBody)}
+              </div>
+            </div>
+          );
+        } else {
+          elements.push(
+            <li key={`li-${i}`} className="mr-5 text-sm sm:text-base text-slate-700 dark:text-slate-300 my-1 leading-relaxed list-disc">
+              {renderBold(itemBody)}
+            </li>
+          );
+        }
       } else if (/^\d+\.\s/.test(trimmed)) {
         elements.push(
           <div key={`num-${i}`} className="mr-3 text-sm sm:text-base text-slate-700 dark:text-slate-300 my-1 leading-relaxed">
